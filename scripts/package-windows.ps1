@@ -1,6 +1,15 @@
-param(
-    [string]$NodePath = "C:\Users\LEGION_T\.cache\codex-runtimes\codex-primary-runtime\dependencies\node\bin\node.exe"
+﻿param(
+    [string]$NodePath
 )
+
+# 패키지에 넣을 node.exe 를 찾습니다. 지정이 없으면 현재 PATH 의 Node 를 씁니다.
+if (-not $NodePath) {
+    $command = Get-Command node.exe -ErrorAction SilentlyContinue
+    if ($null -eq $command) {
+        throw "node.exe 를 찾을 수 없습니다. -NodePath 로 배포에 넣을 Node.js 실행 파일을 지정하세요."
+    }
+    $NodePath = $command.Source
+}
 
 $projectRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
 $releaseRoot = Join-Path $projectRoot "release"
@@ -32,10 +41,18 @@ Copy-Item -LiteralPath (Join-Path $projectRoot "install.ps1") -Destination $reso
 Copy-Item -LiteralPath (Join-Path $projectRoot "uninstall.ps1") -Destination $resolvedTarget
 Copy-Item -LiteralPath (Join-Path $projectRoot "run-server.cmd") -Destination $resolvedTarget
 Copy-Item -LiteralPath (Join-Path $projectRoot "stop-server.cmd") -Destination $resolvedTarget
+Copy-Item -LiteralPath (Join-Path $projectRoot "start-server.ps1") -Destination $resolvedTarget
+Copy-Item -LiteralPath (Join-Path $projectRoot "stop-server.ps1") -Destination $resolvedTarget
 Copy-Item -LiteralPath (Join-Path $projectRoot "README.md") -Destination $resolvedTarget
 Copy-Item -LiteralPath (Join-Path $projectRoot "DEPLOYMENT.md") -Destination $resolvedTarget
 Copy-Item -LiteralPath $NodePath -Destination (Join-Path $resolvedTarget "node.exe")
 New-Item -ItemType Directory -Force -Path (Join-Path $resolvedTarget "data") | Out-Null
+
+# 개발용 DB/키/로그가 배포본에 섞여 들어가지 않게 확인합니다.
+$leaked = Get-ChildItem -LiteralPath (Join-Path $resolvedTarget "data") -Recurse -File -ErrorAction SilentlyContinue
+if ($leaked) {
+    throw "배포 대상 data 폴더가 비어 있지 않습니다: $($leaked.Name -join ', ')"
+}
 
 Compress-Archive -LiteralPath $resolvedTarget -DestinationPath $zipPath -CompressionLevel Optimal
 Remove-Item -LiteralPath $stagingRoot -Recurse -Force

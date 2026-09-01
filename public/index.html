@@ -17,21 +17,33 @@
           </div>
         </div>
         <nav class="nav-list" aria-label="주 메뉴">
-          <button class="nav-item active" data-screen="statement">
-            <span class="nav-icon">▦</span>
+          <button class="nav-item active" data-screen="statement" aria-current="page">
+            <span class="nav-icon" aria-hidden="true">▦</span>
             기성집행서
           </button>
-          <button class="nav-item" data-screen="settings">
-            <span class="nav-icon">⚙</span>
+          <button class="nav-item admin-only" data-screen="settings">
+            <span class="nav-icon" aria-hidden="true">⚙</span>
             분류 · 품번 설정
           </button>
-          <button class="nav-item" data-screen="amarance">
-            <span class="nav-icon">↗</span>
+          <button class="nav-item admin-only" data-screen="amarance">
+            <span class="nav-icon" aria-hidden="true">↗</span>
             아마란스10 설정
+          </button>
+          <button class="nav-item admin-only" data-screen="security">
+            <span class="nav-icon" aria-hidden="true">⛨</span>
+            접속 · 보안
+          </button>
+          <button class="nav-item admin-only" data-screen="users">
+            <span class="nav-icon" aria-hidden="true">☺</span>
+            사용자
+          </button>
+          <button class="nav-item admin-only" data-screen="audit">
+            <span class="nav-icon" aria-hidden="true">≡</span>
+            활동 기록
           </button>
         </nav>
         <div class="connection-card">
-          <span class="status-dot"></span>
+          <span class="status-dot" aria-hidden="true"></span>
           <div>
             <strong id="connectionMode">DEMO</strong>
             <span>아마란스10 연결 상태</span>
@@ -47,46 +59,79 @@
           </div>
           <div class="topbar-actions">
             <span class="today" id="today"></span>
-            <button class="button secondary" id="syncProjectsButton">프로젝트 동기화</button>
+            <button class="button secondary editor-only" id="syncProjectsButton">프로젝트 동기화</button>
+            <div class="user-chip">
+              <button class="user-chip-button" id="userMenuButton" aria-haspopup="true" aria-expanded="false">
+                <span class="user-avatar" id="userAvatar" aria-hidden="true"></span>
+                <span class="user-chip-text">
+                  <strong id="userName">-</strong>
+                  <small id="userRole">-</small>
+                </span>
+              </button>
+              <div class="user-menu hidden" id="userMenu" role="menu">
+                <button role="menuitem" id="changePasswordButton">비밀번호 변경</button>
+                <button role="menuitem" id="logoutButton">로그아웃</button>
+              </div>
+            </div>
           </div>
         </header>
 
-        <section id="statementScreen" class="screen active">
+        <section id="statementScreen" class="screen active" aria-label="기성집행서">
           <div class="panel project-toolbar">
+            <div class="field project-field">
+              <label for="projectFilter">프로젝트 검색</label>
+              <input id="projectFilter" placeholder="코드 또는 이름으로 좁히기" autocomplete="off">
+            </div>
             <div class="field project-field">
               <label for="projectSelect">프로젝트</label>
               <select id="projectSelect"></select>
             </div>
             <div class="project-meta" id="projectMeta"></div>
             <div class="toolbar-spacer"></div>
-            <button class="button secondary" id="cloneSnapshotButton" disabled>이전 버전 복제</button>
-            <button class="button primary" id="newSnapshotButton">현재 설정으로 새 버전</button>
+            <div class="field compact-field editor-only" id="snapshotCategorySetField">
+              <label for="snapshotCategorySet">새 버전에 쓸 설정</label>
+              <select id="snapshotCategorySet"></select>
+            </div>
+            <button class="button secondary editor-only" id="cloneSnapshotButton" disabled>이전 버전 복제</button>
+            <button class="button primary editor-only" id="newSnapshotButton">설정으로 새 버전</button>
           </div>
 
           <div id="emptySnapshot" class="empty-state hidden">
-            <div class="empty-icon">▤</div>
+            <div class="empty-icon" aria-hidden="true">▤</div>
             <h2>아직 집행서 버전이 없습니다</h2>
             <p>현재 분류와 품번 설정을 스냅샷으로 저장해 첫 집행서를 시작하세요.</p>
-            <button class="button primary" id="emptyNewSnapshotButton">첫 버전 만들기</button>
+            <button class="button primary editor-only" id="emptyNewSnapshotButton">첫 버전 만들기</button>
           </div>
 
           <div id="snapshotContent" class="hidden">
             <div class="snapshot-bar">
               <div class="field compact-field">
-                <label for="snapshotSelect">스냅샷 버전</label>
+                <label for="snapshotSelect">집행서 버전</label>
                 <select id="snapshotSelect"></select>
               </div>
               <span class="badge" id="snapshotStatus"></span>
+              <span class="set-tag" id="snapshotCategorySetLabel"></span>
               <span class="snapshot-date" id="snapshotDate"></span>
+              <span class="dirty-flag hidden" id="dirtyFlag">저장하지 않은 변경</span>
               <div class="toolbar-spacer"></div>
-              <button class="button ghost" id="toggleSnapshotStatusButton"></button>
+              <button class="button ghost editor-only" id="renameSnapshotButton">이름 변경</button>
+              <button class="button ghost danger editor-only" id="deleteSnapshotButton">버전 삭제</button>
+              <button class="button ghost editor-only" id="toggleSnapshotStatusButton"></button>
+            </div>
+
+            <div class="notice warning hidden" id="contractChangedNotice">
+              <div>
+                <strong>프로젝트 계약금액이 이 버전과 다릅니다.</strong>
+                <span id="contractChangedDetail"></span>
+              </div>
+              <button class="button secondary editor-only" id="refreshContractButton">이 버전에 반영</button>
             </div>
 
             <div class="summary-grid">
               <article class="summary-card navy">
                 <span>계약금액</span>
                 <strong id="contractAmount">0원</strong>
-                <small>아마란스10 프로젝트 금액</small>
+                <small>버전 생성 시점에 고정</small>
               </article>
               <article class="summary-card blue">
                 <span>실행예산</span>
@@ -105,7 +150,7 @@
               </article>
             </div>
 
-            <div class="panel import-panel">
+            <div class="panel import-panel editor-only">
               <div>
                 <p class="section-kicker">AMARANCE 10</p>
                 <h2>입고금액 불러오기</h2>
@@ -115,12 +160,13 @@
                   <label for="fromDate">입고 시작일</label>
                   <input id="fromDate" type="date">
                 </div>
-                <span>~</span>
+                <span aria-hidden="true">~</span>
                 <div class="field compact-field">
                   <label for="toDate">입고 종료일</label>
                   <input id="toDate" type="date">
                 </div>
               </div>
+              <label class="check-label"><input id="replaceReceipts" type="checkbox"> 기존 내역 지우고 다시 조회</label>
               <button class="button accent" id="importReceiptsButton">매입금액 불러오기</button>
             </div>
 
@@ -131,24 +177,25 @@
                   <h2>분류별 집행 현황</h2>
                 </div>
                 <div class="statement-heading-actions">
-                  <span class="save-hint">실행예산과 비고를 입력한 뒤 저장하세요.</span>
-                  <button class="button accent report-button" id="saveStatementButton">저장</button>
+                  <span class="save-hint" id="saveHint">실행예산과 비고를 입력한 뒤 저장하세요.</span>
+                  <button class="button accent report-button editor-only" id="saveStatementButton">저장</button>
                   <button class="button secondary report-button" id="printStatementButton">인쇄</button>
                   <button class="button secondary report-button" id="exportExcelButton">Excel 내보내기</button>
                 </div>
               </div>
               <div class="table-wrap">
                 <table class="data-table statement-table">
+                  <caption class="visually-hidden">대분류 · 중분류별 실행예산과 매입금액 집행 현황</caption>
                   <thead>
                     <tr>
-                      <th>대분류</th>
-                      <th>중분류</th>
-                      <th>연결 품번</th>
-                      <th class="number-cell">실행예산</th>
-                      <th class="number-cell">매입금액 소계</th>
-                      <th class="number-cell">예산잔액</th>
-                      <th>집행률</th>
-                      <th>비고</th>
+                      <th scope="col">대분류</th>
+                      <th scope="col">중분류</th>
+                      <th scope="col">연결 품번</th>
+                      <th scope="col" class="number-cell">실행예산</th>
+                      <th scope="col" class="number-cell">매입금액 소계</th>
+                      <th scope="col" class="number-cell">예산잔액</th>
+                      <th scope="col">집행률</th>
+                      <th scope="col">비고</th>
                     </tr>
                   </thead>
                   <tbody id="statementRows"></tbody>
@@ -162,9 +209,21 @@
                 <span>입고 상세 내역</span>
                 <strong id="receiptCount">0건</strong>
               </summary>
+              <div class="receipt-toolbar editor-only">
+                <span id="receiptSkipNotice" class="receipt-skip hidden"></span>
+                <div class="toolbar-spacer"></div>
+                <button class="button ghost danger" id="clearReceiptsButton">입고 내역 전체 삭제</button>
+              </div>
               <div class="table-wrap">
                 <table class="data-table">
-                  <thead><tr><th>입고일</th><th>입고번호</th><th>품번</th><th>품명</th><th class="number-cell">공급가액</th><th class="number-cell">부가세</th></tr></thead>
+                  <caption class="visually-hidden">이 버전에 반영된 입고 내역</caption>
+                  <thead>
+                    <tr>
+                      <th scope="col">입고일</th><th scope="col">입고번호</th><th scope="col">품번</th><th scope="col">품명</th>
+                      <th scope="col" class="number-cell">공급가액</th><th scope="col" class="number-cell">부가세</th>
+                      <th scope="col" class="editor-only">삭제</th>
+                    </tr>
+                  </thead>
                   <tbody id="receiptRows"></tbody>
                 </table>
               </div>
@@ -172,13 +231,38 @@
           </div>
         </section>
 
-        <section id="settingsScreen" class="screen">
+        <section id="settingsScreen" class="screen" aria-label="분류 및 품번 설정">
           <div class="settings-intro">
             <div>
               <p class="section-kicker">MASTER DATA</p>
               <h2>집행서 분류 및 품번 설정</h2>
-              <p>여기서 변경한 내용은 다음에 생성하는 스냅샷부터 적용됩니다.</p>
+              <p>설정 버전을 골라 편집합니다. 집행서를 새로 만들면 그 시점의 설정 버전이 그대로 복사되어 따라갑니다.</p>
             </div>
+          </div>
+
+          <div class="panel version-bar">
+            <div class="field compact-field">
+              <label for="categorySetSelect">설정 버전</label>
+              <select id="categorySetSelect"></select>
+            </div>
+            <span class="badge" id="categorySetBadge"></span>
+            <span class="version-meta" id="categorySetMeta"></span>
+            <div class="toolbar-spacer"></div>
+            <div class="version-actions">
+              <button class="button ghost" id="useCategorySetButton">사용 중으로 지정</button>
+              <button class="button secondary" id="cloneCategorySetButton">현재 버전 복제</button>
+              <button class="button secondary" id="newCategorySetButton">새 버전</button>
+              <button class="button ghost" id="renameCategorySetButton">이름 변경</button>
+              <button class="button ghost danger" id="deleteCategorySetButton">삭제</button>
+            </div>
+          </div>
+
+          <div class="notice info hidden" id="categorySetNotice">
+            <div>
+              <strong>지금 보고 있는 설정은 '사용 중' 버전이 아닙니다.</strong>
+              <span>여기서 고친 내용은 이 버전으로 집행서를 만들 때만 반영됩니다.</span>
+            </div>
+            <button class="button secondary" id="noticeUseCategorySetButton">이 버전을 사용 중으로</button>
           </div>
 
           <div class="settings-layout">
@@ -201,7 +285,8 @@
                 <div><span class="step-number">3</span><h2>품번 연결</h2></div>
               </div>
               <div class="item-search-row">
-                <input id="itemSearchInput" placeholder="품번 또는 품명 검색">
+                <label class="visually-hidden" for="itemSearchInput">품번 또는 품명 검색</label>
+                <input id="itemSearchInput" placeholder="품번 또는 품명 검색" autocomplete="off">
                 <button class="button secondary" id="itemSearchButton">아마란스10 검색</button>
               </div>
               <div id="itemSearchResults" class="search-results hidden"></div>
@@ -210,7 +295,7 @@
           </div>
         </section>
 
-        <section id="amaranceSettingsScreen" class="screen">
+        <section id="amaranceSettingsScreen" class="screen" aria-label="아마란스10 설정">
           <div class="settings-intro integration-intro">
             <div>
               <p class="section-kicker">AMARANCE 10 CONNECTION</p>
@@ -253,7 +338,7 @@
             <section class="panel integration-form-panel">
               <div class="panel-heading">
                 <div><span class="step-number">2</span><h2>서버 인증값</h2></div>
-                <span class="security-label">화면 재노출 안 함</span>
+                <span class="security-label">암호화 저장 · 화면 재노출 안 함</span>
               </div>
               <div class="integration-form-grid">
                 <div class="field span-2">
@@ -279,7 +364,7 @@
 
             <section class="panel integration-form-panel endpoint-panel">
               <div class="panel-heading">
-                <div><span class="step-number">3</span><h2>입고 상세 조회</h2></div>
+                <div><span class="step-number">3</span><h2>사용하는 API</h2></div>
               </div>
               <div class="integration-form-grid">
                 <div class="api-path-list span-2">
@@ -289,7 +374,7 @@
                   <div><span>입고 상세 조회</span><code>/apiproxy/api20A02S00202</code></div>
                 </div>
                 <div class="integration-success span-2">
-                  입고 상세 조회 문서 반영 완료 · 공급가액은 rcvgAm, 부가세는 rcvvAm 기준으로 집계합니다.
+                  공급가액은 rcvgAm, 부가세는 rcvvAm 기준으로 집계합니다.
                 </div>
               </div>
             </section>
@@ -300,15 +385,234 @@
             </div>
           </form>
         </section>
+
+        <section id="securityScreen" class="screen" aria-label="접속 및 보안 설정">
+          <div class="settings-intro">
+            <div>
+              <p class="section-kicker">ACCESS CONTROL</p>
+              <h2>접속 · 보안 설정</h2>
+              <p>아마란스10 메뉴트리에서 이 프로그램을 열 때의 자동 로그인(SSO) 규칙과 세션 정책을 정합니다.</p>
+            </div>
+          </div>
+
+          <form id="securitySettingsForm" class="integration-layout">
+            <section class="panel integration-form-panel">
+              <div class="panel-heading">
+                <div><span class="step-number">1</span><h2>아마란스10 메뉴 진입(SSO)</h2></div>
+              </div>
+              <div class="integration-form-grid">
+                <div class="field span-2">
+                  <label class="check-label"><input id="ssoEnabled" type="checkbox"> 아마란스10 메뉴 진입으로 자동 로그인 사용</label>
+                  <small>메뉴트리에는 아래 주소를 붙여 넣습니다.</small>
+                  <code class="sso-url" id="ssoUrlPreview"></code>
+                </div>
+                <div class="field span-2">
+                  <label for="ssoSignatureMode">서명 검증 방식</label>
+                  <select id="ssoSignatureMode">
+                    <option value="PARAMS_SORTED">전체 파라미터 정렬 후 HMAC-SHA256 (권장)</option>
+                    <option value="USER_TIMESTAMP">사용자ID + timestamp HMAC-SHA256</option>
+                    <option value="NONE">서명 검증 안 함 (허용 IP 필수)</option>
+                  </select>
+                  <small>서명 키는 아마란스10 설정의 hashKey를 사용합니다.</small>
+                </div>
+                <div class="field">
+                  <label for="ssoUserParam">사용자 파라미터명</label>
+                  <input id="ssoUserParam" maxlength="50" placeholder="userId">
+                </div>
+                <div class="field">
+                  <label for="ssoNameParam">이름 파라미터명</label>
+                  <input id="ssoNameParam" maxlength="50" placeholder="userNm">
+                </div>
+                <div class="field">
+                  <label for="ssoTimestampParam">시각 파라미터명</label>
+                  <input id="ssoTimestampParam" maxlength="50" placeholder="timestamp">
+                </div>
+                <div class="field">
+                  <label for="ssoSignatureParam">서명 파라미터명</label>
+                  <input id="ssoSignatureParam" maxlength="50" placeholder="sign">
+                </div>
+                <div class="field">
+                  <label for="ssoToleranceSeconds">시각 허용 오차(초)</label>
+                  <input id="ssoToleranceSeconds" type="number" min="30" max="3600" step="10">
+                </div>
+                <div class="field">
+                  <label for="ssoDefaultRole">자동 등록 시 기본 권한</label>
+                  <select id="ssoDefaultRole">
+                    <option value="VIEWER">조회자</option>
+                    <option value="EDITOR">작성자</option>
+                    <option value="ADMIN">관리자</option>
+                  </select>
+                </div>
+                <div class="field span-2">
+                  <label for="ssoAllowedIps">허용 IP (쉼표 구분)</label>
+                  <input id="ssoAllowedIps" placeholder="예: 10.0.1.5, 192.168.10.">
+                  <small>마침표로 끝내면 접두사 일치로 처리합니다. 서명 검증을 끄면 반드시 지정해야 합니다.</small>
+                </div>
+                <div class="field span-2">
+                  <label class="check-label"><input id="ssoAutoCreateUser" type="checkbox"> 등록되지 않은 사용자를 자동으로 만들기</label>
+                  <small>꺼 두면 관리자가 미리 등록한 계정만 진입할 수 있습니다.</small>
+                </div>
+              </div>
+            </section>
+
+            <section class="panel integration-form-panel">
+              <div class="panel-heading">
+                <div><span class="step-number">2</span><h2>세션 · 표시 정책</h2></div>
+              </div>
+              <div class="integration-form-grid">
+                <div class="field span-2">
+                  <label for="frameAncestors">iframe 허용 주소 (공백 구분)</label>
+                  <input id="frameAncestors" placeholder="예: https://erp.example.com">
+                  <small>아마란스10 화면 안에 끼워 넣을 때만 입력합니다. 비워 두면 자기 도메인만 허용합니다.</small>
+                </div>
+                <div class="field">
+                  <label for="cookieSameSite">세션 쿠키 SameSite</label>
+                  <select id="cookieSameSite">
+                    <option value="Lax">Lax · 새 창/새 탭 (권장)</option>
+                    <option value="None">None · 다른 도메인 iframe (HTTPS 필수)</option>
+                    <option value="Strict">Strict · 가장 엄격</option>
+                  </select>
+                </div>
+                <div class="field">
+                  <label class="check-label"><input id="cookieSecure" type="checkbox"> HTTPS 전용 쿠키 강제</label>
+                  <small>SameSite=None을 고르면 자동으로 켜집니다.</small>
+                </div>
+                <div class="field">
+                  <label for="sessionIdleMinutes">자동 로그아웃(분)</label>
+                  <input id="sessionIdleMinutes" type="number" min="5" max="1440" step="5">
+                </div>
+                <div class="field">
+                  <label for="sessionAbsoluteHours">세션 최대 유지(시간)</label>
+                  <input id="sessionAbsoluteHours" type="number" min="1" max="168" step="1">
+                </div>
+                <div class="field">
+                  <label for="receiptMaxRangeDays">입고 조회 최대 기간(일)</label>
+                  <input id="receiptMaxRangeDays" type="number" min="7" max="1830" step="1">
+                </div>
+                <div class="field">
+                  <label class="check-label"><input id="trustProxy" type="checkbox"> 역방향 프록시(IIS 등) 뒤에서 실행</label>
+                  <small>X-Forwarded-For / X-Forwarded-Proto 헤더를 신뢰합니다.</small>
+                </div>
+              </div>
+            </section>
+
+            <div class="integration-actions">
+              <button class="button primary" type="submit">보안 설정 저장</button>
+            </div>
+          </form>
+
+          <section class="panel danger-zone">
+            <div class="panel-heading">
+              <div><span class="step-number danger">!</span><h2>위험 구역</h2></div>
+            </div>
+            <div class="danger-zone-body">
+              <div>
+                <strong>기록된 모든 집행서 초기화</strong>
+                <p id="resetSummary">모든 프로젝트의 집행서 버전, 실행예산, 비고, 불러온 입고 내역, 그리고 프로젝트 목록을 지웁니다.
+                  확정된 집행서도 함께 사라지며 <b>되돌릴 수 없습니다.</b>
+                  분류·품번 설정, 사용자, 아마란스10 연동 설정, 활동 기록은 그대로 남습니다.</p>
+              </div>
+              <button class="button ghost danger" id="openResetButton" type="button">초기화…</button>
+            </div>
+          </section>
+        </section>
+
+        <section id="usersScreen" class="screen" aria-label="사용자 관리">
+          <div class="settings-intro">
+            <div>
+              <p class="section-kicker">USERS</p>
+              <h2>사용자 관리</h2>
+              <p>조회자는 보기만, 작성자는 집행서 작성까지, 관리자는 설정과 사용자까지 다룰 수 있습니다.</p>
+            </div>
+            <div class="intro-actions">
+              <button class="button primary" id="addUserButton">
+                <span class="button-icon" aria-hidden="true">＋</span>사용자 추가
+              </button>
+            </div>
+          </div>
+
+          <div class="panel table-panel">
+            <div class="table-toolbar">
+              <div class="toolbar-search">
+                <span class="search-icon" aria-hidden="true">⌕</span>
+                <label class="visually-hidden" for="userSearch">사용자 검색</label>
+                <input id="userSearch" type="search" placeholder="이름 또는 로그인 ID 검색" autocomplete="off">
+              </div>
+              <div class="toolbar-filter">
+                <label class="visually-hidden" for="userRoleFilter">권한 필터</label>
+                <select id="userRoleFilter">
+                  <option value="">전체 권한</option>
+                  <option value="ADMIN">관리자</option>
+                  <option value="EDITOR">작성자</option>
+                  <option value="VIEWER">조회자</option>
+                </select>
+              </div>
+              <div class="toolbar-spacer"></div>
+              <span class="result-count" id="userCount"></span>
+            </div>
+            <div class="table-wrap">
+              <table class="data-table user-table">
+                <caption class="visually-hidden">등록된 사용자 목록</caption>
+                <thead>
+                  <tr>
+                    <th scope="col">사용자</th>
+                    <th scope="col">권한</th>
+                    <th scope="col">상태</th>
+                    <th scope="col">등록 경로</th>
+                    <th scope="col">최근 로그인</th>
+                    <th scope="col" class="actions-column"><span class="visually-hidden">관리</span></th>
+                  </tr>
+                </thead>
+                <tbody id="userRows"></tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        <section id="auditScreen" class="screen" aria-label="활동 기록">
+          <div class="settings-intro">
+            <div>
+              <p class="section-kicker">AUDIT TRAIL</p>
+              <h2>활동 기록</h2>
+              <p>로그인, 버전 확정, 설정 변경 등 주요 작업의 기록입니다.</p>
+            </div>
+            <div class="audit-filters">
+              <div class="field compact-field">
+                <label for="auditLoginFilter">사용자</label>
+                <input id="auditLoginFilter" placeholder="로그인 ID" autocomplete="off">
+              </div>
+              <button class="button secondary" id="auditRefreshButton">조회</button>
+            </div>
+          </div>
+          <div class="panel table-panel">
+            <div class="table-wrap">
+              <table class="data-table">
+                <caption class="visually-hidden">주요 작업 기록</caption>
+                <thead>
+                  <tr>
+                    <th scope="col">시각</th><th scope="col">사용자</th><th scope="col">작업</th>
+                    <th scope="col">대상</th><th scope="col">내용</th><th scope="col">접속 IP</th>
+                  </tr>
+                </thead>
+                <tbody id="auditRows"></tbody>
+              </table>
+            </div>
+            <div class="audit-pager">
+              <button class="button ghost" id="auditPrevButton">이전</button>
+              <span id="auditRangeLabel"></span>
+              <button class="button ghost" id="auditNextButton">다음</button>
+            </div>
+          </div>
+        </section>
       </main>
     </div>
 
     <section id="printReport" class="print-report" aria-hidden="true"></section>
 
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
-    <div id="loading" class="loading hidden"><span></span><p>처리 중입니다</p></div>
+    <div id="loading" class="loading hidden" role="status" aria-live="polite"><span aria-hidden="true"></span><p>처리 중입니다</p></div>
 
-    <dialog id="textDialog">
+    <dialog id="textDialog" aria-labelledby="textDialogTitle">
       <form method="dialog" id="textDialogForm">
         <h2 id="textDialogTitle"></h2>
         <div class="field">
@@ -316,8 +620,100 @@
           <input id="textDialogInput" maxlength="100" autocomplete="off">
         </div>
         <div class="dialog-actions">
-          <button class="button ghost" value="cancel">취소</button>
-          <button class="button primary" value="confirm" id="textDialogConfirm">저장</button>
+          <button class="button ghost" type="button" data-dialog-cancel="textDialog">취소</button>
+          <button class="button primary" type="submit" value="confirm" id="textDialogConfirm">저장</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="confirmDialog" aria-labelledby="confirmDialogTitle">
+      <form method="dialog" id="confirmDialogForm">
+        <h2 id="confirmDialogTitle"></h2>
+        <p id="confirmDialogMessage"></p>
+        <div class="dialog-actions">
+          <button class="button ghost" type="button" data-dialog-cancel="confirmDialog">취소</button>
+          <button class="button primary" type="submit" value="confirm" id="confirmDialogConfirm">확인</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="userDialog" aria-labelledby="userDialogTitle">
+      <form method="dialog" id="userDialogForm">
+        <h2 id="userDialogTitle">사용자 추가</h2>
+        <div class="field">
+          <label for="userDialogLoginId">로그인 ID</label>
+          <input id="userDialogLoginId" maxlength="60" autocomplete="off" placeholder="아마란스10 사번 또는 계정">
+          <small>아마란스10 메뉴 진입에서 넘어오는 사용자 값과 같아야 자동 로그인이 연결됩니다.</small>
+        </div>
+        <div class="field">
+          <label for="userDialogName">이름</label>
+          <input id="userDialogName" maxlength="60" autocomplete="off">
+        </div>
+        <div class="field">
+          <label for="userDialogRole">권한</label>
+          <select id="userDialogRole">
+            <option value="VIEWER">조회자 · 보기만</option>
+            <option value="EDITOR">작성자 · 집행서 작성</option>
+            <option value="ADMIN">관리자 · 설정과 사용자까지</option>
+          </select>
+        </div>
+        <p class="dialog-error" id="userDialogError" role="alert" hidden></p>
+        <div class="dialog-actions">
+          <button class="button ghost" type="button" data-dialog-cancel="userDialog">취소</button>
+          <button class="button primary" type="submit" value="confirm" id="userDialogConfirm">추가</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="passwordDialog" aria-labelledby="passwordDialogTitle">
+      <form method="dialog" id="passwordDialogForm">
+        <h2 id="passwordDialogTitle">비밀번호 변경</h2>
+        <div class="field">
+          <label for="dialogCurrentPassword">현재 비밀번호</label>
+          <input id="dialogCurrentPassword" type="password" autocomplete="current-password">
+        </div>
+        <div class="field">
+          <label for="dialogNewPassword">새 비밀번호</label>
+          <input id="dialogNewPassword" type="password" autocomplete="new-password">
+          <small>10자 이상, 영문 · 숫자 · 기호 중 두 종류 이상</small>
+        </div>
+        <div class="field">
+          <label for="dialogConfirmPassword">새 비밀번호 확인</label>
+          <input id="dialogConfirmPassword" type="password" autocomplete="new-password">
+        </div>
+        <p class="dialog-error" id="passwordDialogError" role="alert" hidden></p>
+        <div class="dialog-actions">
+          <button class="button ghost" type="button" data-dialog-cancel="passwordDialog">취소</button>
+          <button class="button primary" type="submit" value="confirm" id="passwordDialogConfirm">변경</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="resetDialog" class="wide-dialog" aria-labelledby="resetDialogTitle">
+      <form method="dialog" id="resetDialogForm">
+        <h2 id="resetDialogTitle">기록된 모든 집행서를 초기화합니다</h2>
+        <p class="reset-warning">이 작업은 <b>되돌릴 수 없습니다.</b> 아래 자료가 영구히 삭제됩니다.</p>
+        <ul class="reset-counts" id="resetCounts"></ul>
+        <p class="reset-keep">남는 것: 분류·품번 설정(모든 설정 버전), 사용자 계정, 아마란스10 연동 설정, 활동 기록</p>
+        <div class="field">
+          <label for="resetConfirmInput">계속하려면 <b id="resetPhrase"></b> 를 그대로 입력하세요</label>
+          <input id="resetConfirmInput" autocomplete="off" spellcheck="false" placeholder="확인 문구 입력">
+        </div>
+        <p class="dialog-error" id="resetDialogError" role="alert" hidden></p>
+        <div class="dialog-actions">
+          <button class="button ghost" type="button" data-dialog-cancel="resetDialog">취소</button>
+          <button class="button primary danger" type="submit" value="confirm" id="resetDialogConfirm" disabled>영구 삭제</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="noticeDialog" aria-labelledby="noticeDialogTitle">
+      <form method="dialog">
+        <h2 id="noticeDialogTitle"></h2>
+        <p id="noticeDialogMessage"></p>
+        <div class="notice-value" id="noticeDialogValue"></div>
+        <div class="dialog-actions">
+          <button class="button primary" value="confirm">확인</button>
         </div>
       </form>
     </dialog>
