@@ -55,7 +55,8 @@ const port = Number(process.env.APP_PORT || DEFAULT_PORT);
 const host = process.env.APP_HOST || DEFAULT_HOST;
 
 app.server.listen(port, host, () => {
-  logger.info(`${APP_NAME} 실행: http://${host}:${port}`);
+  logger.info(`${APP_NAME} ${app.buildInfo.version} 실행: http://${host}:${port}`);
+  logger.info(`Node ${process.version}${app.buildInfo.builtAt ? ` · 빌드 ${app.buildInfo.builtAt}` : ""}`);
   logger.info(`아마란스10 모드: ${app.amarance.getConfiguration().mode}`);
   if (host === "0.0.0.0") {
     logger.warn("모든 네트워크 인터페이스에 열려 있습니다. 방화벽으로 접근 범위를 제한하세요.");

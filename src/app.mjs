@@ -1,4 +1,4 @@
-import { createReadStream, existsSync, statSync } from "node:fs";
+import { createReadStream, existsSync, readFileSync, statSync } from "node:fs";
 import { createServer } from "node:http";
 import { extname, join, normalize, resolve, sep } from "node:path";
 
@@ -43,6 +43,28 @@ function contentTypeFor(filePath) {
 }
 
 /**
+ * 배포 패키지에 포함된 빌드 정보를 읽습니다.
+ * 개발 환경에는 파일이 없으므로 기본값을 씁니다.
+ */
+function readBuildInfo(rootDirectory, logger) {
+  const path = join(rootDirectory, "build-info.json");
+  if (!existsSync(path)) return { version: "dev", builtAt: null, commit: null, nodeVersion: process.version };
+  try {
+    // 일부 도구가 UTF-8 BOM 을 붙여 저장하므로 제거한 뒤 해석합니다.
+    const parsed = JSON.parse(readFileSync(path, "utf8").replace(/^﻿/, ""));
+    return {
+      version: String(parsed.version ?? "unknown"),
+      builtAt: parsed.builtAt ?? null,
+      commit: parsed.commit ?? null,
+      nodeVersion: String(parsed.nodeVersion ?? process.version),
+    };
+  } catch (error) {
+    logger.warn("빌드 정보를 읽지 못했습니다.", { error });
+    return { version: "unknown", builtAt: null, commit: null, nodeVersion: process.version };
+  }
+}
+
+/**
  * 서버 인스턴스를 만듭니다. 테스트에서도 같은 함수를 써서
  * 실제 라우팅·인증·오류 처리 경로를 그대로 검증합니다.
  */
@@ -56,6 +78,7 @@ export function createApp({
 } = {}) {
   const publicDirectory = join(rootDirectory, "public");
   const sharedModulePath = join(rootDirectory, "src", "calculations.mjs");
+  const buildInfo = readBuildInfo(rootDirectory, logger);
 
   const database = new AppDatabase({ path: databasePath, secretVault, logger });
   const bootstrapAdmin = database.ensureBootstrapAdmin();
@@ -107,6 +130,7 @@ export function createApp({
       url,
       ip,
       appName: APP_NAME,
+      buildInfo,
       database,
       amarance,
       auth,
@@ -393,5 +417,5 @@ export function createApp({
     });
   }
 
-  return { server, database, amarance, auth, logger, bootstrapAdmin, seedDemoProjectsIfNeeded, close };
+  return { server, database, amarance, auth, logger, buildInfo, bootstrapAdmin, seedDemoProjectsIfNeeded, close };
 }

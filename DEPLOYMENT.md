@@ -3,6 +3,8 @@
 ## 1. 설치
 
 1. `gyeonggi-progress-statement-win-x64.zip`의 압축을 고객사 서버의 고정 폴더에 풉니다. 예: `C:\Apps\GyeonggiProgressStatement`
+   **Node.js 를 따로 설치할 필요는 없습니다** — `node.exe` 가 패키지에 들어 있습니다.
+   메일이나 인터넷으로 받은 압축이면 압축을 풀기 전에 파일 속성에서 **차단 해제**를 체크하세요. 그러지 않으면 Windows 가 스크립트 실행을 막습니다.
 2. 필요하면 `config\appsettings.json`에 포트 등 기본값을 지정합니다. 아마란스10 인증값은 파일이 아니라 프로그램의 `아마란스10 설정` 화면에서 입력하는 것을 권장합니다(암호화 저장됨).
 3. 관리자 PowerShell에서 다음 명령을 실행합니다.
 
@@ -174,6 +176,8 @@ Start-ScheduledTask -TaskName "경기산업-기성집행서"
 프로세스를 종료합니다. 프로세스가 SYSTEM 권한으로 떠 있으면 종료에 관리자 권한이 필요합니다.
 
 ## 10. 운영 점검
+
+- 버전 확인: 화면 왼쪽 아래에 `v0.1.0 · 2026-09-01` 형태로 표시되며, `/api/health` 에서 빌드 시각과 git commit 까지 볼 수 있습니다
 
 - 상태 확인: `http://서버주소:5080/api/health` (로그인 불필요)
 - 로그: `data\logs\app-YYYY-MM-DD.log` (기본 30일 보관, `APP_LOG_RETENTION_DAYS`로 조정)

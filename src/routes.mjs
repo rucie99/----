@@ -111,6 +111,7 @@ export function createRoutes() {
         const security = context.database.getSecuritySettings();
         sendJson(context.response, 200, {
           appName: context.appName,
+          buildInfo: context.buildInfo,
           user: context.database.publicUser(context.user),
           csrfToken: context.session.csrfToken,
           permissions: {
@@ -726,6 +727,10 @@ export function createRoutes() {
         sendJson(context.response, 200, {
           status: "ok",
           appName: context.appName,
+          version: context.buildInfo.version,
+          builtAt: context.buildInfo.builtAt,
+          commit: context.buildInfo.commit,
+          nodeVersion: process.version,
           mode: context.amarance.getConfiguration().mode,
           time: new Date().toISOString(),
           uptimeSeconds: Math.round(process.uptime()),

@@ -1715,6 +1715,10 @@ async function initialize() {
 
   applyPermissions();
   elements.connectionMode.textContent = bootstrap.amarance.mode;
+  const build = bootstrap.buildInfo;
+  elements.buildStamp.textContent = build
+    ? `${build.version}${build.builtAt ? ` · ${String(build.builtAt).slice(0, 10)}` : ""}`
+    : "";
   renderProjects();
   renderCategorySets();
   renderSettings();

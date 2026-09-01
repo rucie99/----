@@ -41,6 +41,7 @@ button { cursor: pointer; }
 .connection-card strong, .connection-card span { display: block; }
 .connection-card strong { font-size: 12px; }
 .connection-card span { margin-top: 3px; font-size: 10px; color: #91a2c0; }
+.build-stamp { margin: 10px 0 0; color: #6f81a3; font-size: 9px; text-align: center; letter-spacing: .3px; }
 .status-dot { width: 9px; height: 9px; flex: 0 0 auto; border-radius: 50%; background: #34d399; box-shadow: 0 0 0 4px rgb(52 211 153 / 14%); }
 
 .main-content { min-width: 0; padding: 32px clamp(24px, 4vw, 54px) 64px; }

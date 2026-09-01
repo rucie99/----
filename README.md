@@ -55,11 +55,26 @@ node --test
 node scripts/check-utf8.mjs
 ```
 
-Windows 배포 패키지는 다음 명령으로 생성합니다.
+## Windows 스탠드얼론 패키지
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts/package-windows.ps1
 ```
+
+`release\gyeonggi-progress-statement-win-x64.zip` 이 만들어집니다.
+**압축을 풀고 `run-server.cmd` 를 실행하면 끝입니다. 대상 PC에 Node.js 를 설치할 필요가 없습니다** — `node.exe` 가 패키지에 함께 들어갑니다.
+
+스크립트가 하는 일:
+
+- 번들할 Node 의 버전(22.5 이상, `node:sqlite` 필요)과 아키텍처를 확인
+- `src` `public` `config` 와 실행 스크립트만 골라 담기 (tests·tmp·data·개발 DB 제외)
+- `build-info.json` 생성 (버전·빌드 시각·git commit·Node 버전) — 화면 좌하단과 `/api/health` 에 표시됩니다
+- `시작하기.txt` 첨부 (설치 없이 실행하는 방법, 최초 관리자 비밀번호 찾는 위치)
+- **압축 전에 번들한 node.exe 로 실제 서버를 띄워 `/api/health` 와 로그인 화면 응답까지 확인** — 실패하면 패키지를 만들지 않습니다
+
+검증만 건너뛰려면 `-SkipSmokeTest`, 다른 Node 를 넣으려면 `-NodePath C:
+ode
+ode.exe` 를 씁니다.
 
 운영 설치, 아마란스10 설정, 메뉴트리 연결은 [DEPLOYMENT.md](DEPLOYMENT.md)를 참고하세요.
 
