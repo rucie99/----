@@ -1,7 +1,18 @@
-data/*.db
-data/*.db-shm
-data/*.db-wal
+# 운영 데이터 (DB, 암호화 키, 로그)
+data/*
+!data/.gitkeep
+
+# 배포 산출물
 release/*
 !release/.gitkeep
+
+# 작업 중 산출물
 tmp/
+output/
+outputs/
 *.log
+
+# 로컬 도구 캐시
+.qa-report/
+.qa-input-flow/
+.claude/settings.local.json
