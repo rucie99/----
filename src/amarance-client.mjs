@@ -4,7 +4,6 @@ import {
   AMARANCE_API_PATH,
   AMARANCE_AUTH_HEADER,
   AMARANCE_MODE,
-  MAX_ITEM_SEARCH_RESULTS,
   MAX_RECEIPT_HEADERS,
   PROJECT_STATUS,
 } from "./constants.mjs";
@@ -26,11 +25,52 @@ const DEMO_ITEMS = [
 
 const REQUEST_TIMEOUT_MS = 30_000;
 const DETAIL_CONCURRENCY = 5;
+/** 품목 전체 목록을 다시 받아오기 전까지 재사용하는 시간. */
+const ITEM_CACHE_TTL_MS = 5 * 60_000;
+
+/** 비교용 문자열: 대소문자 · 공백 · 하이픈 · 밑줄 차이를 무시합니다. */
+function normalizeSearchText(value) {
+  return String(value ?? "").toLowerCase().replace(/[\s\-_]/g, "");
+}
+
+/**
+ * 품목 목록에서 검색어에 맞는 것을 골라 가까운 순으로 정렬합니다.
+ * 띄어쓴 단어는 모두 들어 있어야 하고(AND), 각 단어는 품번 · 품명 · 규격 어디에 있어도 됩니다.
+ * 순서: 품번 일치 → 품번으로 시작 → 품번에 포함 → 품명 · 규격에 포함.
+ */
+export function filterItems(items, query = "") {
+  const terms = String(query).trim().split(/\s+/).map(normalizeSearchText).filter(Boolean);
+  const whole = normalizeSearchText(query);
+  const rank = (item) => {
+    const code = normalizeSearchText(item.itemCode);
+    if (!whole) return 0;
+    if (code === whole) return 0;
+    if (code.startsWith(whole)) return 1;
+    if (code.includes(whole)) return 2;
+    return 3;
+  };
+  return items
+    .filter((item) => {
+      const haystack = [item.itemCode, item.itemName, item.specification].map(normalizeSearchText).join("\u0000");
+      return terms.every((term) => haystack.includes(term));
+    })
+    .map((item) => ({ item, rank: rank(item) }))
+    .sort((a, b) => a.rank - b.rank || String(a.item.itemCode).localeCompare(String(b.item.itemCode)))
+    .map(({ item }) => item);
+}
 
 function mapProjectStatus(value) {
   if (String(value) === "0") return PROJECT_STATUS.COMPLETE;
   if (String(value) === "9") return PROJECT_STATUS.UNUSED;
   return PROJECT_STATUS.ACTIVE;
+}
+
+function toItem(item) {
+  return {
+    itemCode: String(item.itemCd ?? ""),
+    itemName: String(item.itemNm ?? ""),
+    specification: String(item.itemDc ?? ""),
+  };
 }
 
 function compactDate(value) {
@@ -123,6 +163,8 @@ export class AmaranceClient {
     this.hashKey = String(configurationValue(configuration, "hashKey", "AMARANTH_HASH_KEY"));
     this.groupSeq = String(configurationValue(configuration, "groupSeq", "AMARANTH_GROUP_SEQ")).trim();
     this.receiptDetailPath = AMARANCE_API_PATH.RECEIPT_DETAIL_SEARCH;
+    // 연동 대상이 바뀌면 이전 회사의 품목 목록을 쓰지 않도록 비웁니다.
+    this.itemCache = null;
     return this;
   }
 
@@ -169,24 +211,48 @@ export class AmaranceClient {
     }));
   }
 
-  async searchItems(query = "") {
+  /**
+   * 품번 · 품명 · 규격의 일부로 품목을 찾습니다. 맞는 품목을 모두 가까운 순으로 돌려줍니다.
+   *
+   * 아마란스10 품목 조회 API 는 품번 · 품명을 '정확히 일치'로만 찾고, 둘을 함께 보내면 AND 로 묶습니다.
+   * 그래서 조건 없이 전체 품목을 받아 두고(ITEM_CACHE_TTL_MS 동안 재사용) 여기서 부분 일치로 거릅니다.
+   * 전체 조회가 실패하면 품번 · 품명 정확히 일치 조회로 대신합니다.
+   */
+  async searchItems(query = "", { refresh = false } = {}) {
+    try {
+      return filterItems(await this.listItems({ refresh }), query);
+    } catch (error) {
+      const exact = String(query).trim();
+      if (this.mode === AMARANCE_MODE.DEMO || !exact) throw error;
+      this.logger?.warn("품목 전체 조회에 실패해 정확히 일치 조회로 대신합니다.", { error });
+      const [byCode, byName] = await Promise.all([
+        this.post(AMARANCE_API_PATH.ITEM_SEARCH, { coCd: this.companyCode, itemCd: exact, itemNm: "", useYn: "1" }),
+        this.post(AMARANCE_API_PATH.ITEM_SEARCH, { coCd: this.companyCode, itemCd: "", itemNm: exact, useYn: "1" }),
+      ]);
+      const unique = new Map([...byCode, ...byName].map((item) => [String(item.itemCd), item]));
+      return [...unique.values()].map(toItem);
+    }
+  }
+
+  /** 사용 중인 품목 전체 목록. 잠시 메모리에 두고 재사용합니다. */
+  async listItems({ refresh = false } = {}) {
     if (this.mode === AMARANCE_MODE.DEMO) {
-      const normalized = query.trim().toLowerCase();
-      return DEMO_ITEMS
-        .filter(([code, name]) => !normalized || code.toLowerCase().includes(normalized) || name.toLowerCase().includes(normalized))
-        .map(([itemCode, itemName]) => ({ itemCode, itemName, specification: "" }));
+      return DEMO_ITEMS.map(([itemCode, itemName]) => ({ itemCode, itemName, specification: "" }));
+    }
+    if (!refresh && this.itemCache && Date.now() - this.itemCache.loadedAt < ITEM_CACHE_TTL_MS) {
+      return this.itemCache.items;
     }
     const result = await this.post(AMARANCE_API_PATH.ITEM_SEARCH, {
       coCd: this.companyCode,
-      itemCd: query,
-      itemNm: query,
+      itemCd: "",
+      itemNm: "",
       useYn: "1",
     });
-    return result.slice(0, MAX_ITEM_SEARCH_RESULTS).map((item) => ({
-      itemCode: item.itemCd,
-      itemName: item.itemNm,
-      specification: item.itemDc || "",
-    }));
+    // 응답의 다른 항목(100여 개)은 쓰지 않으므로 세 가지만 남겨 메모리를 아낍니다.
+    const items = result.map(toItem);
+    this.itemCache = { loadedAt: Date.now(), items };
+    this.logger?.info("아마란스10 품목 목록을 받았습니다.", { count: items.length });
+    return items;
   }
 
   /**

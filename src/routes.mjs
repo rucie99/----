@@ -400,12 +400,13 @@ export function createRoutes() {
       role: USER_ROLE.ADMIN,
       async handle(context) {
         const body = await readJson(context.request);
-        const items = await context.amarance.searchItems(String(body.query ?? "").slice(0, 100));
+        const items = await context.amarance.searchItems(String(body.query ?? "").slice(0, 100), { refresh: Boolean(body.refresh) });
         const mapped = new Map(context.database
           .listMappedItemCodes(body.categorySetId ? Number(body.categorySetId) : null)
           .map((row) => [row.itemCode, row]));
         sendJson(context.response, 200, {
-          truncated: items.length >= MAX_ITEM_SEARCH_RESULTS,
+          total: items.length,
+          truncated: items.length > MAX_ITEM_SEARCH_RESULTS,
           items: items.slice(0, MAX_ITEM_SEARCH_RESULTS).map((item) => ({
             ...item,
             mappedTo: mapped.has(item.itemCode)

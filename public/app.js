@@ -1257,25 +1257,34 @@ async function deleteMinor(row) {
   showToast("소분류를 삭제했습니다.");
 }
 
-async function searchItems() {
+/**
+ * 품번 · 품명 · 규격의 일부로 검색합니다. 서버가 아마란스10 품목 목록을 잠시 보관해 두므로,
+ * 방금 아마란스10에 등록한 품목은 '품목 목록 새로 받기'로 다시 받아야 보입니다.
+ */
+async function searchItems({ refresh = false } = {}) {
   const query = elements.itemSearchInput.value.trim();
   const result = await busy(() => api(API.ITEM_SEARCH, {
     method: "POST",
-    body: JSON.stringify({ query, categorySetId: state.selectedCategorySetId }),
+    body: JSON.stringify({ query, refresh, categorySetId: state.selectedCategorySetId }),
   }));
   elements.itemSearchResults.classList.remove("hidden");
-  const notice = result.truncated
-    ? '<div class="settings-placeholder">결과가 많아 일부만 표시했습니다. 검색어를 좁혀 주세요.</div>'
-    : "";
-  elements.itemSearchResults.innerHTML = result.items.length
-    ? notice + result.items.map((item) => `
+  const summary = `
+    <div class="search-summary">
+      <span>${result.truncated
+        ? `${result.total.toLocaleString("ko-KR")}건 중 앞 ${result.items.length.toLocaleString("ko-KR")}건만 표시합니다. 검색어를 더 입력해 주세요.`
+        : `검색 결과 ${result.total.toLocaleString("ko-KR")}건`}</span>
+      <button type="button" class="link-button refresh-item-list">품목 목록 새로 받기</button>
+    </div>`;
+  elements.itemSearchResults.innerHTML = summary + (result.items.length
+    ? result.items.map((item) => `
       <div class="search-result">
         <code>${escapeHtml(item.itemCode)}</code>
-        <span>${escapeHtml(item.itemName)}${item.mappedTo ? `<em class="already-mapped">${escapeHtml(item.mappedTo)}에 연결됨</em>` : ""}</span>
+        <span>${escapeHtml(item.itemName)}${item.specification ? `<small class="item-spec">${escapeHtml(item.specification)}</small>` : ""}${item.mappedTo ? `<em class="already-mapped">${escapeHtml(item.mappedTo)}에 연결됨</em>` : ""}</span>
         <button data-code="${escapeHtml(item.itemCode)}" data-name="${escapeHtml(item.itemName)}" ${item.mappedTo ? "disabled" : ""}>연결</button>
       </div>`).join("")
-    : '<div class="settings-placeholder">검색 결과가 없습니다.</div>';
-  elements.itemSearchResults.querySelectorAll("button:not([disabled])").forEach((button) =>
+    : '<div class="settings-placeholder">검색 결과가 없습니다.<br>품번 · 품명 · 규격의 일부만 넣어도 찾습니다. 방금 아마란스10에 등록한 품목이면 \'품목 목록 새로 받기\'를 눌러 주세요.</div>');
+  elements.itemSearchResults.querySelector(".refresh-item-list").addEventListener("click", () => ignoreFailure(searchItems({ refresh: true })));
+  elements.itemSearchResults.querySelectorAll(".search-result button:not([disabled])").forEach((button) =>
     button.addEventListener("click", () => addItem(button.dataset.code, button.dataset.name)));
 }
 
