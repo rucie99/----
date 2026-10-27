@@ -1,6 +1,6 @@
 {
   "name": "gyeonggi-industry-progress-statement",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "description": "아마란스10 입고금액 기반 프로젝트 기성집행서",
