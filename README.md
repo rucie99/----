@@ -96,6 +96,8 @@ ode.exe` 를 씁니다.
 | `src/errors.mjs` | 화면에 보여줄 오류와 내부 오류의 구분, DB 오류 한국어 변환 |
 | `src/logger.mjs` | 일자별 파일 로그 |
 | `start-server.ps1` / `stop-server.ps1` | 실행·종료 로직과 한글 안내 (`*.cmd`는 이 파일을 부르는 ASCII 런처) |
+| `public/manual.html` | 사용 설명서. 화면 오른쪽 위 **사용 설명서** 버튼과 로그인 화면에서 새 탭으로 엽니다 |
+| `scripts/capture-manual-screens.mjs` | 설명서의 예시 화면(`public/manual/img`)과 번호 위치(`public/manual/shots.css`)를 다시 찍습니다. 화면을 바꾼 뒤 `node scripts/capture-manual-screens.mjs` (Edge 또는 Chrome 필요) |
 
 ### 인코딩 규칙
 

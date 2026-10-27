@@ -1,0 +1,465 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>사용 설명서 · 경기산업 기성집행서</title>
+    <link rel="stylesheet" href="/manual.css">
+    <link rel="stylesheet" href="/manual/shots.css">
+  </head>
+  <body>
+    <header class="manual-header">
+      <div class="manual-brand">
+        <span class="brand-mark" aria-hidden="true">GI</span>
+        <div>
+          <strong>경기산업 기성집행서</strong>
+          <span>사용 설명서</span>
+        </div>
+      </div>
+      <a class="back-link" href="/">프로그램으로 돌아가기</a>
+    </header>
+
+    <div class="manual-layout">
+      <nav class="toc" aria-label="목차">
+        <p class="toc-title">목차</p>
+        <ol>
+          <li><a href="#start">처음이라면 이 순서대로</a></li>
+          <li><a href="#login">1. 로그인</a></li>
+          <li><a href="#tour">2. 화면 둘러보기</a></li>
+          <li><a href="#statement">3. 집행서 만들기</a></li>
+          <li><a href="#print">4. 인쇄 · Excel</a></li>
+          <li><a href="#categories">5. 분류 · 품번 설정</a></li>
+          <li><a href="#admin">6. 관리자 기능</a></li>
+          <li><a href="#faq">7. 자주 묻는 질문</a></li>
+          <li><a href="#words">8. 용어 풀이</a></li>
+        </ol>
+      </nav>
+
+      <main class="manual-content">
+        <section class="intro">
+          <h1>기성집행서 사용 설명서</h1>
+          <p class="lead">
+            기성집행서는 아마란스10의 <b>프로젝트</b>와 <b>입고금액</b>을 가져와,
+            프로젝트마다 <b>얼마를 쓰기로 했고(실행예산) 얼마를 썼는지(매입금액)</b>,
+            그래서 <b>얼마가 남는지(예상 이익)</b>를 한눈에 보여 주는 프로그램입니다.
+          </p>
+          <p class="note">
+            그림 위의 <span class="badge-inline">1</span> 같은 번호는 아래 설명의 번호와 같습니다.
+            그림을 누르면 새 탭에서 크게 볼 수 있습니다. 그림에 나온 프로젝트와 금액은 설명을 위한 예시입니다.
+          </p>
+        </section>
+
+        <!-- ====================================================== 빠른 시작 -->
+        <section id="start">
+          <h2>처음이라면 이 순서대로</h2>
+          <p>집행서 한 건을 만드는 전체 흐름입니다. 각 단계를 누르면 자세한 설명으로 이동합니다.</p>
+          <ol class="quick-steps">
+            <li><a href="#login"><b>로그인</b><span>아이디·비밀번호 입력</span></a></li>
+            <li><a href="#step-project"><b>프로젝트 고르기</b><span>새 버전 만들기</span></a></li>
+            <li><a href="#step-import"><b>매입금액 불러오기</b><span>아마란스10 입고금액</span></a></li>
+            <li><a href="#step-budget"><b>실행예산 입력 · 저장</b><span>잔액·집행률 자동 계산</span></a></li>
+            <li><a href="#step-confirm"><b>확정 · 인쇄</b><span>결재용 문서 출력</span></a></li>
+          </ol>
+          <p class="tip"><b>권한에 따라 보이는 메뉴가 다릅니다.</b>
+            조회자는 보기·인쇄만, 작성자는 집행서 작성까지, 관리자는 설정과 사용자 관리까지 할 수 있습니다.
+            버튼이 안 보이면 관리자에게 권한을 확인하세요.</p>
+        </section>
+
+        <!-- ====================================================== 1. 로그인 -->
+        <section id="login">
+          <h2>1. 로그인 <span class="step-no">1단계</span></h2>
+          <p>아마란스10 메뉴에서 들어오면 <b>자동으로 로그인</b>됩니다. 인터넷 주소로 직접 들어왔다면 아래처럼 로그인합니다.</p>
+
+          <figure class="shot w-sm" data-shot="login">
+            <div class="shot-frame">
+              <a class="zoom" href="/manual/img/login.webp" target="_blank" rel="noopener" title="새 탭에서 크게 보기"><img src="/manual/img/login.webp" alt="로그인 화면" loading="lazy"></a>
+              <span class="mark mark-1">1</span><span class="mark mark-2">2</span><span class="mark mark-3">3</span><span class="mark mark-4">4</span>
+            </div>
+          </figure>
+          <ol class="legend">
+            <li><b>로그인 ID</b> — 관리자에게 받은 아이디(보통 사번)를 넣습니다.</li>
+            <li><b>비밀번호</b> — 처음에는 관리자에게 받은 <b>임시 비밀번호</b>를 넣습니다.</li>
+            <li><b>로그인</b>을 누릅니다.</li>
+            <li><b>사용 설명서 보기</b> — 로그인 전에도 이 설명서를 열 수 있습니다.</li>
+          </ol>
+
+          <h3>처음 로그인하면 비밀번호부터 바꿉니다</h3>
+          <p>임시 비밀번호로 들어오면 <b>비밀번호 변경</b> 화면이 나옵니다.
+            현재 비밀번호(임시 비밀번호)와 새 비밀번호를 두 번 넣고 <b>변경하고 시작하기</b>를 누르세요.</p>
+          <ul>
+            <li>새 비밀번호는 <b>10자 이상</b>, 영문·숫자·기호 중 <b>두 종류 이상</b>을 섞어야 합니다.</li>
+            <li>로그인을 여러 번 틀리면 잠시 막힙니다. 화면에 나온 시간이 지난 뒤 다시 해 보세요.</li>
+            <li>비밀번호를 잊었다면 관리자에게 <b>비밀번호 초기화</b>를 요청하세요.</li>
+          </ul>
+
+          <details class="admin-box">
+            <summary>설치 직후 맨 처음 관리자 로그인 (관리자만)</summary>
+            <p>프로그램을 처음 실행하면 관리자 계정 <code>admin</code> 이 자동으로 만들어집니다.
+              임시 비밀번호는 서버의 <code>data\logs\app-(날짜).log</code> 파일에
+              <code>최초 관리자 계정을 만들었습니다</code> 라는 줄로 <b>한 번만</b> 기록됩니다.
+              로그인해서 비밀번호를 바꾼 뒤, <a href="#admin-users">사용자</a> 화면에서 실제 사용자를 등록하세요.</p>
+          </details>
+        </section>
+
+        <!-- ====================================================== 2. 화면 둘러보기 -->
+        <section id="tour">
+          <h2>2. 화면 둘러보기</h2>
+          <p>로그인하면 <b>기성집행서</b> 화면이 열립니다. 대부분의 일은 이 화면 하나에서 끝납니다.</p>
+
+          <figure class="shot" data-shot="overview">
+            <div class="shot-frame">
+              <a class="zoom" href="/manual/img/overview.webp" target="_blank" rel="noopener" title="새 탭에서 크게 보기"><img src="/manual/img/overview.webp" alt="기성집행서 화면 전체" loading="lazy"></a>
+              <span class="mark mark-1">1</span><span class="mark mark-2">2</span><span class="mark mark-3">3</span><span class="mark mark-4">4</span><span class="mark mark-5">5</span><span class="mark mark-6">6</span>
+            </div>
+          </figure>
+          <ol class="legend">
+            <li><b>왼쪽 메뉴</b> — 화면을 바꿉니다. 관리자에게는 설정 메뉴가 더 보입니다.</li>
+            <li><b>프로젝트 줄</b> — 어떤 프로젝트의 집행서를 볼지 고르고, 새 버전을 만듭니다.</li>
+            <li><b>버전 줄</b> — 이 프로젝트의 집행서 버전(v1, v2 …)과 상태(작성중/확정)를 봅니다.</li>
+            <li><b>요약 카드</b> — 계약금액·실행예산·매입금액·예상 이익이 자동으로 계산됩니다.</li>
+            <li><b>입고금액 불러오기</b> — 아마란스10에서 매입금액을 가져옵니다. 그 아래에 분류별 표가 있습니다.</li>
+            <li><b>사용 설명서</b> — 언제든 오른쪽 위에서 이 설명서를 새 탭으로 엽니다.</li>
+          </ol>
+
+          <figure class="shot w-md" data-shot="topbar">
+            <div class="shot-frame">
+              <a class="zoom" href="/manual/img/topbar.webp" target="_blank" rel="noopener" title="새 탭에서 크게 보기"><img src="/manual/img/topbar.webp" alt="오른쪽 위 버튼" loading="lazy"></a>
+              <span class="mark mark-1">1</span><span class="mark mark-2">2</span>
+            </div>
+          </figure>
+          <ol class="legend">
+            <li><b>사용 설명서</b> — 지금 보고 있는 이 설명서입니다.</li>
+            <li><b>내 이름</b> — 누르면 <b>비밀번호 변경</b>과 <b>로그아웃</b>이 나옵니다.</li>
+          </ol>
+          <p class="tip">아무 작업 없이 8시간이 지나면 자동으로 로그아웃됩니다(관리자가 바꿀 수 있음).</p>
+        </section>
+
+        <!-- ====================================================== 3. 집행서 만들기 -->
+        <section id="statement">
+          <h2>3. 집행서 만들기</h2>
+          <p>집행서는 프로젝트마다 <b>버전</b>으로 만듭니다. 작성중인 버전에 매입금액을 불러오고 실행예산을 넣은 뒤,
+            다 되면 <b>확정</b>합니다. 이 장은 <b>작성자 이상</b> 권한이 필요합니다.</p>
+
+          <h3 id="step-project"><span class="step-no">2단계</span> 프로젝트를 고르고 새 버전 만들기</h3>
+          <figure class="shot" data-shot="project-bar">
+            <div class="shot-frame">
+              <a class="zoom" href="/manual/img/project-bar.webp" target="_blank" rel="noopener" title="새 탭에서 크게 보기"><img src="/manual/img/project-bar.webp" alt="프로젝트 줄과 버전 줄" loading="lazy"></a>
+              <span class="mark mark-1">1</span><span class="mark mark-2">2</span><span class="mark mark-3">3</span><span class="mark mark-4">4</span><span class="mark mark-5">5</span><span class="mark mark-6">6</span>
+            </div>
+          </figure>
+          <ol class="legend">
+            <li><b>프로젝트 검색</b> — 코드나 이름 일부를 넣으면 목록이 좁혀집니다.</li>
+            <li><b>프로젝트</b> — 집행서를 만들 프로젝트를 고릅니다.</li>
+            <li><b>이전 버전 복제</b> — 지금 버전의 실행예산·비고를 그대로 가져와 새 버전을 만듭니다.</li>
+            <li><b>설정으로 새 버전</b> — 빈 집행서를 새로 만듭니다. 처음이면 이 버튼을 누르세요.</li>
+            <li><b>집행서 버전</b> — 만든 버전을 골라 봅니다. 옆에 <b>작성중</b>/<b>확정</b> 상태가 보입니다.</li>
+            <li><b>버전 확정</b> — 작성이 끝나면 누릅니다(<a href="#step-confirm">5단계</a>).</li>
+          </ol>
+          <ul>
+            <li>목록에 새 프로젝트가 없으면 오른쪽 위 <b>프로젝트 동기화</b>를 누르세요. 아마란스10에서 프로젝트와 계약금액을 다시 가져옵니다.</li>
+            <li>버전은 만든 순간의 분류와 계약금액을 그대로 간직합니다. 나중에 설정이 바뀌어도 이미 만든 버전은 바뀌지 않습니다.</li>
+          </ul>
+
+          <h3 id="step-import"><span class="step-no">3단계</span> 매입금액 불러오기</h3>
+          <figure class="shot" data-shot="import">
+            <div class="shot-frame">
+              <a class="zoom" href="/manual/img/import.webp" target="_blank" rel="noopener" title="새 탭에서 크게 보기"><img src="/manual/img/import.webp" alt="입고금액 불러오기" loading="lazy"></a>
+              <span class="mark mark-1">1</span><span class="mark mark-2">2</span><span class="mark mark-3">3</span><span class="mark mark-4">4</span>
+            </div>
+          </figure>
+          <ol class="legend">
+            <li><b>입고 시작일</b> — 처음에는 최근 3개월이 들어 있습니다. 프로젝트 시작일로 바꾸세요.</li>
+            <li><b>입고 종료일</b> — 보통 오늘 날짜 그대로 둡니다.</li>
+            <li><b>기존 내역 지우고 다시 조회</b> — 체크하면 이미 불러온 입고를 모두 지우고 새로 채웁니다. 평소에는 비워 두세요.</li>
+            <li><b>매입금액 불러오기</b>를 누르면 표의 매입금액이 채워집니다.</li>
+          </ol>
+          <ul>
+            <li>여러 번 불러와도 <b>같은 입고는 한 번만</b> 들어갑니다. 기간을 나눠서 차례로 불러와도 됩니다.</li>
+            <li>한 번에 고를 수 있는 기간은 기본 <b>최대 366일</b>입니다. 더 길게 필요하면 관리자가 <a href="#admin-security">접속 · 보안</a>에서 늘릴 수 있습니다.</li>
+            <li>분류에 연결되지 않은 품번은 빠집니다. 빠진 품번은 표 아래 <b>입고 상세 내역</b>에 안내됩니다.</li>
+          </ul>
+
+          <h3 id="step-budget"><span class="step-no">4단계</span> 실행예산 입력하고 저장하기</h3>
+          <figure class="shot" data-shot="table">
+            <div class="shot-frame">
+              <a class="zoom" href="/manual/img/table.webp" target="_blank" rel="noopener" title="새 탭에서 크게 보기"><img src="/manual/img/table.webp" alt="분류별 집행 현황 표" loading="lazy"></a>
+              <span class="mark mark-1">1</span><span class="mark mark-2">2</span><span class="mark mark-3">3</span><span class="mark mark-4">4</span><span class="mark mark-5">5</span><span class="mark mark-6">6</span><span class="mark mark-7">7</span><span class="mark mark-8">8</span>
+            </div>
+          </figure>
+          <ol class="legend">
+            <li><b>중분류</b> — 소분류가 있는 중분류는 오른쪽에 소분류가 줄줄이 나옵니다.</li>
+            <li><b>소분류</b> — 소분류가 없는 중분류(배관자재 등)는 한 줄로 보입니다.</li>
+            <li><b>실행예산</b> — 숫자만 입력합니다. 칸을 벗어나면 쉼표가 붙습니다.</li>
+            <li><b>소 계</b> — 소분류가 2개 이상인 중분류의 합계입니다. 자동 계산됩니다.</li>
+            <li><b>○○ 합계</b> — 대분류(자재비 등)의 합계입니다.</li>
+            <li><b>저장</b> — 반드시 눌러야 기록됩니다.</li>
+            <li><b>인쇄</b> — 결재용 A4 문서를 인쇄합니다(<a href="#print">4장</a>).</li>
+            <li><b>Excel 내보내기</b> — 같은 내용을 Excel 파일로 받습니다(<a href="#print">4장</a>).</li>
+          </ol>
+          <div class="keys">
+            <p><kbd>Enter</kbd> 다음 칸으로 &nbsp; <kbd>Shift</kbd> + <kbd>Enter</kbd> 이전 칸으로</p>
+          </div>
+          <ul>
+            <li>입력하는 즉시 <b>예산잔액·집행률·소계·합계</b>와 위쪽 요약 카드가 바뀝니다.</li>
+            <li>예산보다 더 쓰면 잔액이 <span class="neg">△ 빨간 글씨</span>로, 집행률 막대가 빨간색으로 보입니다.</li>
+            <li><b>저장 전에는</b> 버전 줄에 <code>저장하지 않은 변경</code>이 보이고, 다른 화면으로 가려 하면 확인 창이 뜹니다.</li>
+            <li>다른 사람이 같은 버전을 먼저 저장했다면 덮어쓰지 않고 알려 줍니다. 화면을 새로 고친 뒤 다시 입력하세요.</li>
+          </ul>
+
+          <h3>합계는 어떻게 보나요?</h3>
+          <figure class="shot" data-shot="table-totals">
+            <div class="shot-frame">
+              <a class="zoom" href="/manual/img/table-totals.webp" target="_blank" rel="noopener" title="새 탭에서 크게 보기"><img src="/manual/img/table-totals.webp" alt="대분류 합계와 전체 합계" loading="lazy"></a>
+              <span class="mark mark-1">1</span><span class="mark mark-2">2</span>
+            </div>
+          </figure>
+          <ol class="legend">
+            <li><b>대분류 합계</b> — 그 대분류에 속한 줄의 합입니다. 소계를 한 번 더 더하지 않습니다.</li>
+            <li><b>전체 합계</b> — 모든 대분류 합계를 더한 값으로, 요약 카드의 실행예산·매입금액과 같습니다.</li>
+          </ol>
+
+          <h3>입고 상세 내역 보기 · 지우기</h3>
+          <figure class="shot" data-shot="receipts">
+            <div class="shot-frame">
+              <a class="zoom" href="/manual/img/receipts.webp" target="_blank" rel="noopener" title="새 탭에서 크게 보기"><img src="/manual/img/receipts.webp" alt="입고 상세 내역" loading="lazy"></a>
+              <span class="mark mark-1">1</span><span class="mark mark-2">2</span><span class="mark mark-3">3</span>
+            </div>
+          </figure>
+          <ol class="legend">
+            <li><b>입고 상세 내역</b> — 누르면 펼쳐집니다. 매입금액이 어떤 입고로 이루어졌는지 건별로 보입니다.</li>
+            <li><b>입고 내역 전체 삭제</b> — 이 버전에 불러온 입고를 모두 지웁니다.</li>
+            <li><b>삭제</b> — 잘못 들어간 입고 한 건만 뺍니다.</li>
+          </ol>
+
+          <h3 id="step-confirm"><span class="step-no">5단계</span> 버전 확정</h3>
+          <p>입력을 모두 <b>저장</b>한 뒤 버전 줄의 <b>버전 확정</b>을 누르고, 확인 창에서 <b>확정</b>을 누릅니다.</p>
+          <p class="warn"><b>확정하면 되돌릴 수 없습니다.</b> 실행예산·입고 내역·계약금액이 그대로 고정되고 삭제도 할 수 없습니다.
+            고쳐야 하면 <b>이전 버전 복제</b>로 새 버전을 만들어 작업하세요.</p>
+
+          <h3>그 밖의 버전 관리</h3>
+          <ul>
+            <li><b>이름 변경</b> — "2026년 3분기 기성"처럼 알아보기 쉬운 이름으로 바꿉니다. 확정된 버전도 바꿀 수 있습니다.</li>
+            <li><b>버전 삭제</b> — 작성중인 버전만 지울 수 있습니다. 입력한 예산과 입고 내역도 함께 지워집니다.</li>
+            <li><b>계약금액이 바뀌었을 때</b> — <code>프로젝트 계약금액이 이 버전과 다릅니다</code> 안내가 뜨면, 작성중인 버전은 <b>이 버전에 반영</b>으로 맞춥니다.</li>
+          </ul>
+        </section>
+
+        <!-- ====================================================== 4. 인쇄 · Excel -->
+        <section id="print">
+          <h2>4. 인쇄 · Excel 내보내기</h2>
+          <p>표 오른쪽 위의 <b>인쇄</b>와 <b>Excel 내보내기</b>로 결재용 문서를 만듭니다. 조회자도 쓸 수 있습니다.</p>
+          <table class="compare">
+            <thead><tr><th></th><th>인쇄</th><th>Excel 내보내기</th></tr></thead>
+            <tbody>
+              <tr><th>용지</th><td>A4 가로</td><td>A4 가로, 한 페이지 폭에 맞춤</td></tr>
+              <tr><th>내용</th><td>결재란(작성·검토·승인), 요약, 분류별 표</td><td>같은 구성. 잔액·집행률·소계·합계는 수식으로 들어감</td></tr>
+              <tr><th>반영되는 값</th><td>화면에 입력한 현재 값(저장 전 포함)</td><td><b>저장된 값만</b></td></tr>
+              <tr><th>파일 이름</th><td>-</td><td><code>기성집행서_프로젝트코드_v버전.xlsx</code></td></tr>
+            </tbody>
+          </table>
+          <ul>
+            <li>PDF로 남기려면 인쇄 창에서 프린터를 <b>PDF로 저장</b>으로 고릅니다.</li>
+            <li>색이 빠져 나오면 인쇄 창의 <b>배경 그래픽</b>을 켜세요.</li>
+            <li>Excel은 <b>저장한 뒤</b> 내보내세요. 저장하지 않은 입력은 파일에 들어가지 않습니다.</li>
+          </ul>
+        </section>
+
+        <!-- ====================================================== 5. 분류 · 품번 설정 -->
+        <section id="categories">
+          <h2>5. 분류 · 품번 설정 <span class="role-tag">관리자</span></h2>
+          <p>집행서의 줄은 이 화면에서 정한 <b>대분류 › 중분류 › 소분류</b>로 만들어지고,
+            각 줄의 매입금액은 거기에 <b>연결한 품번</b>의 입고로 계산됩니다. 품번 연결이 빠지면 매입금액도 빠집니다.</p>
+
+          <figure class="shot" data-shot="settings">
+            <div class="shot-frame">
+              <a class="zoom" href="/manual/img/settings.webp" target="_blank" rel="noopener" title="새 탭에서 크게 보기"><img src="/manual/img/settings.webp" alt="분류 · 품번 설정 화면" loading="lazy"></a>
+              <span class="mark mark-1">1</span><span class="mark mark-2">2</span><span class="mark mark-3">3</span><span class="mark mark-4">4</span><span class="mark mark-5">5</span>
+            </div>
+          </figure>
+          <ol class="legend">
+            <li><b>설정 버전</b> — 분류 설정을 버전으로 보관합니다. <b>사용 중</b>인 버전이 새 집행서에 쓰입니다.</li>
+            <li><b>대분류 ＋</b> — 예: 구매품비, 제작비</li>
+            <li><b>중분류 ＋</b> — 고른 대분류 아래에 추가합니다.</li>
+            <li><b>소분류 ＋</b> — 필요할 때만 추가합니다(아래 설명).</li>
+            <li><b>품번 연결</b> — 고른 중분류(또는 소분류)에 아마란스10 품번을 붙입니다.</li>
+          </ol>
+          <ul>
+            <li>각 줄의 <b>▲ ▼</b>로 순서를 바꿉니다. 이 순서가 집행서 줄 순서입니다.</li>
+            <li>분류를 지우면 그 아래 분류와 품번 연결도 함께 지워집니다.</li>
+            <li>설정을 고쳐도 <b>이미 만든 집행서는 바뀌지 않습니다.</b> 반영하려면 집행서에서 <b>설정으로 새 버전</b>을 만드세요.</li>
+            <li>분류를 크게 바꿀 때는 <b>현재 버전 복제</b>로 새 설정 버전을 만들어 고친 뒤 <b>사용 중으로 지정</b>하면 안전합니다.</li>
+          </ul>
+
+          <h3>소분류와 중분류 소계</h3>
+          <p>소분류는 <b>선택 사항</b>입니다. 중분류 안을 나눠 보고 <b>소계</b>가 필요할 때만 만드세요.</p>
+          <table class="compare">
+            <thead><tr><th>중분류 아래 소분류</th><th>집행서에 보이는 모양</th></tr></thead>
+            <tbody>
+              <tr><td>없음</td><td>중분류 한 줄</td></tr>
+              <tr><td>1개</td><td>소분류 한 줄 (소계 없음 — 같은 금액이라 생략)</td></tr>
+              <tr><td>2개 이상</td><td>소분류마다 한 줄 + 끝에 <b>소 계</b></td></tr>
+            </tbody>
+          </table>
+          <ul>
+            <li><b>첫 소분류를 만들면</b> 그 중분류에 붙어 있던 품번이 새 소분류로 옮겨집니다. 옮기기 전에 확인 창이 뜹니다.</li>
+            <li>소분류가 있는 중분류는 <b>소분류를 골라야</b> 품번을 연결할 수 있고, 실행예산도 소분류마다 넣습니다.</li>
+            <li>예: 구매품비 › 구입품비 아래에 <code>구입품비</code>, <code>재고사용</code>, <code>설계MISS(품확)</code>, <code>고객요구</code>를 만들면 네 줄 아래에 구입품비 소계가 나옵니다.</li>
+          </ul>
+
+          <h3>품번 검색해서 연결하기</h3>
+          <figure class="shot w-sm" data-shot="item-search">
+            <div class="shot-frame">
+              <a class="zoom" href="/manual/img/item-search.webp" target="_blank" rel="noopener" title="새 탭에서 크게 보기"><img src="/manual/img/item-search.webp" alt="품번 검색" loading="lazy"></a>
+              <span class="mark mark-1">1</span><span class="mark mark-2">2</span><span class="mark mark-3">3</span><span class="mark mark-4">4</span>
+            </div>
+          </figure>
+          <ol class="legend">
+            <li><b>검색어</b> — 품번·품명·규격의 <b>일부</b>만 넣어도 됩니다.</li>
+            <li><b>아마란스10 검색</b>(또는 <kbd>Enter</kbd>)</li>
+            <li><b>연결</b> — 지금 고른 분류에 품번을 붙입니다. 해제는 아래 목록의 <b>연결 해제</b>.</li>
+            <li><b>품목 목록 새로 받기</b> — 방금 아마란스10에 등록한 품목이 안 보일 때 누릅니다.</li>
+          </ol>
+          <ul>
+            <li>대소문자, 띄어쓰기, <code>-</code>는 구분하지 않습니다. <code>aa00001</code>로도 <code>A-A00001</code>을 찾습니다.</li>
+            <li>두 단어를 띄어 쓰면 둘 다 들어간 품목만 나옵니다. 예: <code>bush 121816</code></li>
+            <li>한 품번은 한 설정 버전 안에서 <b>한 곳에만</b> 연결됩니다. 이미 연결된 품번은 <code>○○에 연결됨</code>으로 표시되고 연결 버튼이 꺼집니다.</li>
+          </ul>
+        </section>
+
+        <!-- ====================================================== 6. 관리자 기능 -->
+        <section id="admin">
+          <h2>6. 관리자 기능 <span class="role-tag">관리자</span></h2>
+
+          <h3 id="admin-users">사용자 등록 · 관리</h3>
+          <figure class="shot" data-shot="users">
+            <div class="shot-frame">
+              <a class="zoom" href="/manual/img/users.webp" target="_blank" rel="noopener" title="새 탭에서 크게 보기"><img src="/manual/img/users.webp" alt="사용자 관리" loading="lazy"></a>
+              <span class="mark mark-1">1</span><span class="mark mark-2">2</span><span class="mark mark-3">3</span><span class="mark mark-4">4</span>
+            </div>
+          </figure>
+          <ol class="legend">
+            <li><b>사용자 추가</b> — 로그인 ID, 이름, 권한을 넣습니다. 만들면 <b>임시 비밀번호가 한 번만</b> 보이니 본인에게 직접 전달하세요.</li>
+            <li><b>권한</b> — 목록에서 바로 바꿉니다. 내 권한과 마지막 관리자의 권한은 낮출 수 없습니다.</li>
+            <li><b>사용 중지</b> — 기록은 남기고 로그인만 막습니다(퇴사자 등).</li>
+            <li><b>비밀번호 초기화</b> — 새 임시 비밀번호를 만들고, 그 사용자의 로그인을 모두 해제합니다.</li>
+          </ol>
+          <p class="tip">아마란스10 자동 로그인을 쓰면 로그인 ID를 <b>아마란스10 사번(계정)과 똑같이</b> 등록해야 합니다.</p>
+
+          <h3 id="admin-security">접속 · 보안 — 입고 조회 기간 늘리기</h3>
+          <p><code>입고 조회 기간은 최대 366일까지입니다</code> 오류가 나면 여기서 늘립니다.</p>
+          <figure class="shot w-md" data-shot="security">
+            <div class="shot-frame">
+              <a class="zoom" href="/manual/img/security.webp" target="_blank" rel="noopener" title="새 탭에서 크게 보기"><img src="/manual/img/security.webp" alt="세션 · 표시 정책" loading="lazy"></a>
+              <span class="mark mark-1">1</span><span class="mark mark-2">2</span>
+            </div>
+          </figure>
+          <ol class="legend">
+            <li><b>자동 로그아웃(분)</b> — 아무 작업이 없을 때 로그아웃되는 시간. 기본 480분.</li>
+            <li><b>입고 조회 최대 기간(일)</b> — 기본 366일, 최대 1830일(약 5년)까지 늘릴 수 있습니다.</li>
+          </ol>
+          <figure class="shot" data-shot="security-save">
+            <div class="shot-frame">
+              <a class="zoom" href="/manual/img/security-save.webp" target="_blank" rel="noopener" title="새 탭에서 크게 보기"><img src="/manual/img/security-save.webp" alt="보안 설정 저장 버튼" loading="lazy"></a>
+              <span class="mark mark-1">3</span>
+            </div>
+          </figure>
+          <ol class="legend from-3" start="3">
+            <li>값을 바꾼 뒤 화면 아래 <b>보안 설정 저장</b>을 눌러야 적용됩니다.</li>
+          </ol>
+          <p class="tip">기간 안 입고가 2,000건을 넘으면 기간을 좁히라는 오류가 납니다. 그때는 1년씩 나눠 불러오세요. 이미 불러온 입고는 중복되지 않습니다.</p>
+
+          <h3>아마란스10 설정</h3>
+          <p>더존에서 받은 연동값(API 기본 주소, 회사코드, 그룹시퀀스, callerName, accessToken, hashKey)을 넣고
+            <b>연동 모드</b>를 <code>LIVE</code>로 둡니다. <code>DEMO</code>는 시험용 가짜 데이터입니다.</p>
+          <ol>
+            <li>값을 넣고 <b>설정 저장</b>을 누릅니다.</li>
+            <li><b>저장값으로 연결 테스트</b>로 실제 연결을 확인합니다.</li>
+          </ol>
+          <p>accessToken·hashKey는 암호화해 저장되며, 저장 후에는 <code>저장됨</code>으로만 보입니다. 바꿀 때만 새 값을 넣으세요.</p>
+
+          <h3>활동 기록</h3>
+          <p>로그인, 버전 생성·저장·확정, 입고 반영, 설정 변경, 사용자 변경, Excel 내보내기를 누가·언제 했는지 남습니다.</p>
+
+          <h3>기록된 모든 집행서 초기화</h3>
+          <p>접속 · 보안 화면 맨 아래 <b>위험 구역</b>에 있습니다. 시험 운영을 끝내고 실제 운영을 시작할 때만 씁니다.</p>
+          <ul>
+            <li><b>지워지는 것:</b> 모든 집행서 버전(확정본 포함), 실행예산·비고, 입고 내역, 프로젝트 목록</li>
+            <li><b>남는 것:</b> 분류·품번 설정, 사용자 계정, 아마란스10 연동 설정, 활동 기록</li>
+          </ul>
+          <p class="warn">확인란에 화면의 문구를 그대로 넣어야 실행되며, <b>되돌릴 수 없습니다.</b></p>
+        </section>
+
+        <!-- ====================================================== 7. FAQ -->
+        <section id="faq">
+          <h2>7. 자주 묻는 질문</h2>
+          <p>궁금한 질문을 누르면 답이 펼쳐집니다.</p>
+          <details>
+            <summary>"로그인 ID 또는 비밀번호가 올바르지 않습니다"가 나와요.</summary>
+            <p>아이디·비밀번호가 틀렸거나, 사용 중지된 계정입니다. 관리자에게 <b>비밀번호 초기화</b>를 요청하세요.</p>
+          </details>
+          <details>
+            <summary>"입고 조회 기간은 최대 366일까지입니다"가 나와요.</summary>
+            <p>기간을 나눠서 차례로 불러오면 됩니다(중복은 자동으로 걸러짐). 한 번에 길게 불러와야 하면 관리자가
+              <a href="#admin-security">접속 · 보안</a>에서 최대 기간을 늘립니다.</p>
+          </details>
+          <details>
+            <summary>"조회 기간의 입고 건수가 너무 많습니다"가 나와요.</summary>
+            <p>기간 안 입고가 2,000건을 넘었습니다. 기간을 좁혀 여러 번 불러오세요.</p>
+          </details>
+          <details>
+            <summary>매입금액이 0원이거나 예상보다 적어요.</summary>
+            <p>그 줄의 <b>연결 품번</b>이 <code>미설정</code>인지, 입고 기간이 프로젝트 기간을 다 덮는지 확인하세요.
+              <b>입고 상세 내역</b>에 <code>설정에 없는 품번 N건은 제외했습니다</code>가 보이면, 관리자가 그 품번을 분류에 연결한 뒤
+              <b>설정으로 새 버전</b>을 만들어 다시 불러와야 합니다.</p>
+          </details>
+          <details>
+            <summary>"다른 사용자가 이 버전을 먼저 저장했습니다"가 나와요.</summary>
+            <p>같은 버전을 두 사람이 동시에 고쳤습니다. 화면을 새로 고쳐 최신 내용을 확인한 뒤 다시 입력하고 저장하세요.</p>
+          </details>
+          <details>
+            <summary>확정한 버전을 고치고 싶어요.</summary>
+            <p>확정은 되돌릴 수 없습니다. <b>이전 버전 복제</b>로 새 버전을 만들어 고치세요. 예산과 비고가 그대로 복사됩니다.</p>
+          </details>
+          <details>
+            <summary>분류를 고쳤는데 집행서가 그대로예요.</summary>
+            <p>집행서는 만들 때의 설정을 복사해 둡니다. 설정이 <b>사용 중</b>인지 확인하고 <b>설정으로 새 버전</b>을 만드세요.</p>
+          </details>
+          <details>
+            <summary>품번 검색에 품목이 안 나와요.</summary>
+            <p>방금 등록한 품목이면 <b>품목 목록 새로 받기</b>를 누르세요. 아마란스10에서 사용하지 않음으로 된 품목은 나오지 않습니다.</p>
+          </details>
+          <details>
+            <summary>"아마란스10 서버에 연결하지 못했습니다" 또는 "응답 시간이 초과되었습니다"가 나와요.</summary>
+            <p>잠시 후 다시 해 보세요. 계속되면 관리자가 아마란스10 설정에서 <b>저장값으로 연결 테스트</b>로 확인합니다.</p>
+          </details>
+          <details>
+            <summary>메뉴나 버튼이 안 보여요.</summary>
+            <p>권한이 부족합니다. 관리자에게 권한 변경을 요청하세요(<a href="#start">권한 안내</a>).</p>
+          </details>
+        </section>
+
+        <!-- ====================================================== 8. 용어 -->
+        <section id="words">
+          <h2>8. 용어 풀이</h2>
+          <dl class="glossary">
+            <dt>계약금액</dt><dd>아마란스10 프로젝트의 수주금액. 버전을 만들 때의 값으로 고정됩니다.</dd>
+            <dt>실행예산</dt><dd>이 프로젝트에 쓰기로 계획한 금액. 분류별로 직접 입력합니다.</dd>
+            <dt>매입금액</dt><dd>실제로 들어온 입고의 <b>공급가액</b>(부가세 제외) 합계. 아마란스10에서 불러옵니다.</dd>
+            <dt>예산잔액</dt><dd>실행예산 − 매입금액. 음수면 예산을 넘긴 것입니다.</dd>
+            <dt>집행률</dt><dd>매입금액 ÷ 실행예산. 100%를 넘으면 빨간색으로 표시됩니다.</dd>
+            <dt>예상 이익 · 이익률</dt><dd>계약금액 − 매입금액, 그리고 그 금액을 계약금액으로 나눈 비율입니다.</dd>
+            <dt>버전</dt><dd>한 프로젝트의 집행서를 시점별로 남긴 것(v1, v2 …). 작성중 → 확정 순서로 진행합니다.</dd>
+            <dt>확정</dt><dd>버전을 잠그는 것. 확정 후에는 수정·삭제할 수 없습니다.</dd>
+            <dt>대분류 · 중분류 · 소분류</dt><dd>집행서 줄을 묶는 단계. 소분류는 중분류 소계가 필요할 때만 씁니다.</dd>
+            <dt>품번 연결</dt><dd>아마란스10 품번을 분류에 붙이는 것. 연결된 품번의 입고만 매입금액에 들어갑니다.</dd>
+            <dt>설정 버전</dt><dd>분류·품번 설정의 보관본. 사용 중인 설정 버전이 새 집행서에 복사됩니다.</dd>
+          </dl>
+        </section>
+
+        <footer class="manual-footer">
+          <p>경기산업 기성집행서 사용 설명서 · 프로그램 v0.2.0 기준</p>
+        </footer>
+      </main>
+    </div>
+  </body>
+</html>
