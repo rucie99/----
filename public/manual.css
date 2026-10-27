@@ -1,0 +1,133 @@
+/* 사용 설명서(manual.html) 전용 스타일. 화면 위 번호 위치는 manual/shots.css 가 정합니다. */
+:root {
+  color-scheme: light;
+  font-family: "Pretendard", "Noto Sans KR", "Malgun Gothic", sans-serif;
+  --navy-900: #102042;
+  --blue-600: #2563eb;
+  --blue-50: #eff6ff;
+  --slate-700: #334155;
+  --slate-500: #64748b;
+  --slate-200: #e2e8f0;
+  --slate-100: #f1f5f9;
+  --background: #f5f7fb;
+  --mark: #f97316;
+  --danger: #dc2626;
+}
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; scroll-padding-top: 84px; }
+body { margin: 0; color: #172033; background: var(--background); font-size: 15px; line-height: 1.75; }
+a { color: var(--blue-600); }
+code { padding: 1px 6px; border-radius: 5px; color: var(--navy-900); background: var(--slate-100); font-family: Consolas, "D2Coding", monospace; font-size: .88em; }
+kbd { display: inline-block; min-width: 24px; padding: 0 7px; border: 1px solid #cbd5e1; border-bottom-width: 3px; border-radius: 6px; background: #fff; font: 600 12px/22px Consolas, monospace; text-align: center; }
+
+/* ------------------------------------------------------------ 머리 */
+.manual-header { position: sticky; top: 0; z-index: 10; display: flex; justify-content: space-between; align-items: center; padding: 12px 28px; color: #fff; background: var(--navy-900); }
+.manual-brand { display: flex; gap: 12px; align-items: center; }
+.manual-brand strong { display: block; font-size: 15px; }
+.manual-brand div span { color: #b8c4d9; font-size: 12px; }
+.brand-mark { display: grid; place-items: center; width: 38px; height: 38px; border-radius: 10px; color: var(--navy-900); background: #fff; font-weight: 900; }
+.back-link { padding: 8px 14px; border-radius: 8px; color: #fff; background: rgb(255 255 255 / 12%); font-size: 13px; font-weight: 700; text-decoration: none; }
+.back-link:hover { background: rgb(255 255 255 / 22%); }
+
+/* ------------------------------------------------------------ 배치 */
+.manual-layout { display: grid; grid-template-columns: 230px minmax(0, 1fr); gap: 32px; max-width: 1180px; margin: 0 auto; padding: 28px 24px 60px; }
+.toc { position: sticky; top: 84px; align-self: start; padding: 18px 16px; border-radius: 14px; background: #fff; box-shadow: 0 1px 2px rgb(15 23 42 / 6%); }
+.toc-title { margin: 0 0 8px; color: var(--slate-500); font-size: 12px; font-weight: 800; letter-spacing: .5px; }
+.toc ol { margin: 0; padding: 0; list-style: none; }
+.toc a { display: block; padding: 6px 10px; border-radius: 8px; color: var(--slate-700); font-size: 14px; text-decoration: none; }
+.toc a:hover { color: var(--blue-600); background: var(--blue-50); }
+
+.manual-content > section { margin-bottom: 26px; padding: 30px 34px; border-radius: 16px; background: #fff; box-shadow: 0 1px 2px rgb(15 23 42 / 6%); }
+h1 { margin: 0 0 12px; font-size: 30px; letter-spacing: -.8px; }
+h2 { margin: 0 0 14px; font-size: 23px; letter-spacing: -.5px; }
+h3 { margin: 34px 0 10px; font-size: 18px; letter-spacing: -.3px; }
+.lead { font-size: 16.5px; }
+.intro .note { margin-bottom: 0; color: var(--slate-500); font-size: 14px; }
+ul, ol { padding-left: 22px; }
+li { margin: 4px 0; }
+.neg { color: var(--danger); font-weight: 700; }
+.role-tag { margin-left: 6px; padding: 2px 10px; border-radius: 999px; color: #fff; background: var(--navy-900); font-size: 12px; font-weight: 700; vertical-align: middle; }
+.step-no { display: inline-block; margin-right: 8px; padding: 1px 10px; border-radius: 999px; color: var(--blue-600); background: var(--blue-50); font-size: 13px; font-weight: 800; vertical-align: 2px; }
+
+/* ------------------------------------------------------------ 안내 상자 */
+.tip, .warn { padding: 12px 16px 12px 44px; border-radius: 10px; position: relative; }
+.tip { background: var(--blue-50); }
+.warn { background: #fef2f2; }
+.tip::before, .warn::before { position: absolute; left: 14px; top: 12px; display: grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; color: #fff; font-size: 12px; font-weight: 900; line-height: 1; }
+.tip::before { content: "i"; background: var(--blue-600); }
+.warn::before { content: "!"; background: var(--danger); }
+.admin-box { margin-top: 18px; padding: 4px 18px; border: 1px dashed #cbd5e1; border-radius: 10px; }
+
+/* ------------------------------------------------------------ 빠른 시작 */
+.quick-steps { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; margin: 18px 0; padding: 0; list-style: none; counter-reset: quick; }
+.quick-steps li { margin: 0; counter-increment: quick; }
+.quick-steps a { display: block; height: 100%; padding: 14px 14px 12px; border: 1px solid var(--slate-200); border-radius: 12px; color: inherit; text-decoration: none; transition: .15s ease; }
+.quick-steps a::before { content: counter(quick); display: grid; place-items: center; width: 28px; height: 28px; margin-bottom: 8px; border-radius: 50%; color: #fff; background: var(--blue-600); font-weight: 900; }
+.quick-steps a:hover { border-color: var(--blue-600); box-shadow: 0 6px 16px rgb(37 99 235 / 12%); }
+.quick-steps b { display: block; font-size: 15px; line-height: 1.4; }
+.quick-steps span { color: var(--slate-500); font-size: 12.5px; }
+
+/* ------------------------------------------------------------ 예시 화면 + 번호 */
+.shot { margin: 18px 0 10px; }
+.shot.w-sm { max-width: 460px; }
+.shot.w-md { max-width: 600px; }
+.shot-frame { position: relative; overflow: visible; border: 1px solid var(--slate-200); border-radius: 12px; background: var(--background); }
+.shot-frame img { display: block; width: 100%; height: auto; border-radius: 11px; }
+.shot-frame .zoom { display: block; cursor: zoom-in; }
+.mark, .badge-inline, .legend > li::before {
+  display: inline-grid; place-items: center; width: 26px; height: 26px; border-radius: 50%;
+  color: #fff; background: var(--mark); font-size: 13px; font-weight: 900; line-height: 1;
+}
+.mark { position: absolute; transform: translate(-45%, -45%); border: 2px solid #fff; box-shadow: 0 2px 6px rgb(15 23 42 / 35%); pointer-events: none; }
+.badge-inline { width: 20px; height: 20px; font-size: 11px; vertical-align: 1px; }
+
+.legend { margin: 6px 0 14px; padding: 0; list-style: none; counter-reset: legend; }
+.legend.from-3 { counter-reset: legend 2; }
+.legend > li { position: relative; margin: 8px 0; padding-left: 36px; counter-increment: legend; }
+.legend > li::before { content: counter(legend); position: absolute; left: 0; top: 1px; }
+
+.keys p { margin: 6px 0 12px; color: var(--slate-700); font-size: 14px; }
+
+/* ------------------------------------------------------------ 표 */
+.compare { width: 100%; margin: 12px 0; border-collapse: collapse; font-size: 14px; }
+.compare th, .compare td { padding: 10px 12px; border-bottom: 1px solid var(--slate-200); text-align: left; vertical-align: top; }
+.compare thead th { color: var(--slate-500); background: var(--slate-100); font-size: 13px; }
+.compare tbody th { width: 120px; color: var(--slate-700); }
+
+/* ------------------------------------------------------------ 자주 묻는 질문 */
+#faq details { border-bottom: 1px solid var(--slate-200); }
+#faq summary { padding: 14px 4px; cursor: pointer; font-weight: 700; }
+#faq summary:hover { color: var(--blue-600); }
+#faq details p { margin: 0 0 14px; padding: 0 4px 0 22px; color: var(--slate-700); }
+.admin-box summary { padding: 10px 0; cursor: pointer; font-weight: 700; }
+
+/* ------------------------------------------------------------ 용어 */
+.glossary { display: grid; grid-template-columns: 170px minmax(0, 1fr); margin: 0; border-top: 1px solid var(--slate-200); }
+.glossary dt, .glossary dd { margin: 0; padding: 11px 6px; border-bottom: 1px solid var(--slate-200); }
+.glossary dt { font-weight: 800; }
+
+.manual-footer { color: var(--slate-500); font-size: 13px; text-align: center; }
+
+/* ------------------------------------------------------------ 좁은 화면 */
+@media (max-width: 900px) {
+  .manual-layout { grid-template-columns: 1fr; padding: 16px; }
+  .toc { position: static; }
+  .toc ol { display: flex; flex-wrap: wrap; gap: 4px; }
+  .manual-content > section { padding: 22px 18px; }
+  .quick-steps { grid-template-columns: 1fr 1fr; }
+  .glossary { grid-template-columns: 1fr; }
+  .glossary dt { padding-bottom: 0; border-bottom: 0; }
+  .mark { width: 20px; height: 20px; font-size: 11px; }
+  .manual-header { padding: 10px 16px; }
+}
+
+/* ------------------------------------------------------------ 인쇄 */
+@media print {
+  html { scroll-padding-top: 0; }
+  body { background: #fff; font-size: 11pt; print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+  .manual-header, .toc, .back-link { display: none; }
+  .manual-layout { display: block; max-width: none; padding: 0; }
+  .manual-content > section { padding: 0; margin-bottom: 18pt; box-shadow: none; break-inside: auto; }
+  .shot, .legend > li { break-inside: avoid; }
+  #faq details { display: block; }
+}

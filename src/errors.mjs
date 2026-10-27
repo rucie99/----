@@ -45,9 +45,10 @@ export function payloadTooLarge(message = "요청 데이터가 너무 큽니다.
 const UNIQUE_CONSTRAINT_MESSAGE = Object.freeze({
   "major_categories.name": "이미 등록된 대분류명입니다. 다른 이름을 사용해 주세요.",
   "major_categories.category_set_id, major_categories.name": "이 설정 버전에 이미 같은 대분류명이 있습니다.",
-  "item_mappings.category_set_id, item_mappings.item_code": "이 설정 버전에서 이미 다른 중분류에 연결된 품번입니다. 기존 연결을 먼저 해제해 주세요.",
+  "item_mappings.category_set_id, item_mappings.item_code": "이 설정 버전에서 이미 다른 분류에 연결된 품번입니다. 기존 연결을 먼저 해제해 주세요.",
   "category_sets.version_no": "같은 설정 버전 번호가 이미 있습니다. 다시 시도해 주세요.",
   "middle_categories.major_category_id, middle_categories.name": "같은 대분류 안에 이미 같은 중분류명이 있습니다.",
+  "minor_categories.middle_category_id, minor_categories.name": "같은 중분류 안에 이미 같은 소분류명이 있습니다.",
   "item_mappings.item_code": "이미 다른 중분류에 연결된 품번입니다. 기존 연결을 먼저 해제해 주세요.",
   "projects.code": "이미 등록된 프로젝트코드입니다.",
   "snapshots.project_id, snapshots.version_no": "같은 버전 번호가 이미 있습니다. 잠시 후 다시 시도해 주세요.",

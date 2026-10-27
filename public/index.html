@@ -61,6 +61,9 @@
           <div class="topbar-actions">
             <span class="today" id="today"></span>
             <button class="button secondary editor-only" id="syncProjectsButton">프로젝트 동기화</button>
+            <a class="button ghost help-button" id="helpButton" href="/manual.html" target="_blank" rel="noopener" title="새 탭에서 사용 설명서를 엽니다">
+              <span class="help-icon" aria-hidden="true">?</span>사용 설명서
+            </a>
             <div class="user-chip">
               <button class="user-chip-button" id="userMenuButton" aria-haspopup="true" aria-expanded="false">
                 <span class="user-avatar" id="userAvatar" aria-hidden="true"></span>
@@ -186,11 +189,12 @@
               </div>
               <div class="table-wrap">
                 <table class="data-table statement-table">
-                  <caption class="visually-hidden">대분류 · 중분류별 실행예산과 매입금액 집행 현황</caption>
+                  <caption class="visually-hidden">대분류 · 중분류 · 소분류별 실행예산과 매입금액 집행 현황</caption>
                   <thead>
                     <tr>
                       <th scope="col">대분류</th>
                       <th scope="col">중분류</th>
+                      <th scope="col">소분류</th>
                       <th scope="col">연결 품번</th>
                       <th scope="col" class="number-cell">실행예산</th>
                       <th scope="col" class="number-cell">매입금액 소계</th>
@@ -281,13 +285,20 @@
               </div>
               <div id="middleList" class="master-list"></div>
             </section>
+            <section class="panel settings-panel">
+              <div class="panel-heading">
+                <div><span class="step-number">3</span><h2>소분류 <small class="panel-optional">선택</small></h2></div>
+                <button class="icon-button" id="addMinorButton" aria-label="소분류 추가">＋</button>
+              </div>
+              <div id="minorList" class="master-list"></div>
+            </section>
             <section class="panel settings-panel item-panel">
               <div class="panel-heading">
-                <div><span class="step-number">3</span><h2>품번 연결</h2></div>
+                <div><span class="step-number">4</span><h2>품번 연결</h2></div>
               </div>
               <div class="item-search-row">
                 <label class="visually-hidden" for="itemSearchInput">품번 또는 품명 검색</label>
-                <input id="itemSearchInput" placeholder="품번 또는 품명 검색" autocomplete="off">
+                <input id="itemSearchInput" placeholder="품번 · 품명 · 규격 일부로 검색 (예: A-A0, BUSH)" autocomplete="off">
                 <button class="button secondary" id="itemSearchButton">아마란스10 검색</button>
               </div>
               <div id="itemSearchResults" class="search-results hidden"></div>

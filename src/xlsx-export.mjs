@@ -1,4 +1,4 @@
-import { groupExecutionLines } from "./calculations.mjs";
+import { countExecutionRows, groupExecutionLines } from "./calculations.mjs";
 import { SNAPSHOT_STATUS } from "./constants.mjs";
 
 const XLSX_NAMESPACE = Object.freeze({
@@ -21,7 +21,13 @@ const REPORT = Object.freeze({
   SHEET_NAME: "기성집행서",
   TABLE_HEADER_ROW: 9,
   FIRST_DATA_ROW: 10,
-  COLUMN_COUNT: 8,
+  COLUMN_COUNT: 9,
+});
+
+/** 금액 수식이 참조하는 열. */
+const COLUMN = Object.freeze({
+  BUDGET: "E",
+  PURCHASE: "F",
 });
 
 const CELL_STYLE = Object.freeze({
@@ -46,6 +52,10 @@ const CELL_STYLE = Object.freeze({
   NOTE: 18,
   SIGN_LABEL: 19,
   SIGN_BOX: 20,
+  MIDDLE: 21,
+  MIDDLE_SUBTOTAL_TEXT: 22,
+  MIDDLE_SUBTOTAL_AMOUNT: 23,
+  MIDDLE_SUBTOTAL_PERCENT: 24,
 });
 
 function xmlEscape(value) {
@@ -121,14 +131,36 @@ function formatDateTime(value) {
   }).format(new Date(value));
 }
 
+/** 행 번호 목록을 SUM 인수로 줄입니다. [10,11,12,14] → "E10:E12,E14" */
+function sumArguments(column, rowNumbers) {
+  const ranges = [];
+  for (const rowNumber of rowNumbers) {
+    const last = ranges[ranges.length - 1];
+    if (last && last.end === rowNumber - 1) last.end = rowNumber;
+    else ranges.push({ start: rowNumber, end: rowNumber });
+  }
+  return ranges.map(({ start, end }) => (start === end ? `${column}${start}` : `${column}${start}:${column}${end}`)).join(",");
+}
+
+/** 실행예산 · 매입금액 · 잔액 · 집행률 네 칸. 잔액과 집행률은 같은 행의 E · F 를 참조합니다. */
+function amountValues(rowNumber, totals, styles, formulas = {}) {
+  return [
+    value(totals.executionBudget, styles.amount, formulas.budget || ""),
+    value(totals.purchaseAmount, styles.amount, formulas.purchase || ""),
+    value(totals.balanceAmount, styles.amount, `${COLUMN.BUDGET}${rowNumber}-${COLUMN.PURCHASE}${rowNumber}`),
+    value(totals.executionRate / 100, styles.percent,
+      `IF(${COLUMN.BUDGET}${rowNumber}=0,0,${COLUMN.PURCHASE}${rowNumber}/${COLUMN.BUDGET}${rowNumber})`),
+  ];
+}
+
 function buildWorksheet(snapshot, generatedAt) {
   const groups = groupExecutionLines(snapshot.lines);
-  const grandRow = REPORT.FIRST_DATA_ROW + snapshot.lines.length + groups.length;
+  const grandRow = REPORT.FIRST_DATA_ROW + countExecutionRows(groups);
   const noteRow = grandRow + 2;
   const signLabelRow = grandRow + 4;
   const signBoxRow = grandRow + 5;
   const sheetRows = [];
-  const merges = ["A1:H2", "A3:D3", "E3:H3", "A5:B5", "C5:D5", "E5:F5", "A6:B6", "C6:D6", "E6:F6", "A8:H8"];
+  const merges = ["A1:I2", "A3:D3", "E3:I3", "A5:B5", "C5:D5", "E5:F5", "H5:I5", "A6:B6", "C6:D6", "E6:F6", "H6:I6", "A8:I8"];
 
   sheetRows.push(row(1, [value("기 성 집 행 서", CELL_STYLE.TITLE)], { height: 26 }));
   sheetRows.push(row(2, emptyRow(), { height: 12 }));
@@ -142,20 +174,21 @@ function buildWorksheet(snapshot, generatedAt) {
     value("계약금액", CELL_STYLE.SUMMARY_LABEL), value("", CELL_STYLE.SUMMARY_LABEL),
     value("실행예산", CELL_STYLE.SUMMARY_LABEL), value("", CELL_STYLE.SUMMARY_LABEL),
     value("매입금액", CELL_STYLE.SUMMARY_LABEL), value("", CELL_STYLE.SUMMARY_LABEL),
-    value("예상 이익", CELL_STYLE.SUMMARY_LABEL), value("예상 이익률", CELL_STYLE.SUMMARY_LABEL),
+    value("예상 이익", CELL_STYLE.SUMMARY_LABEL), value("예상 이익률", CELL_STYLE.SUMMARY_LABEL), value("", CELL_STYLE.SUMMARY_LABEL),
   ], { height: 21 }));
   sheetRows.push(row(6, [
     value(snapshot.totals.contractAmount, CELL_STYLE.SUMMARY_AMOUNT), value("", CELL_STYLE.SUMMARY_AMOUNT),
-    value(snapshot.totals.executionBudget, CELL_STYLE.SUMMARY_AMOUNT, `D${grandRow}`), value("", CELL_STYLE.SUMMARY_AMOUNT),
-    value(snapshot.totals.purchaseAmount, CELL_STYLE.SUMMARY_AMOUNT, `E${grandRow}`), value("", CELL_STYLE.SUMMARY_AMOUNT),
+    value(snapshot.totals.executionBudget, CELL_STYLE.SUMMARY_AMOUNT, `${COLUMN.BUDGET}${grandRow}`), value("", CELL_STYLE.SUMMARY_AMOUNT),
+    value(snapshot.totals.purchaseAmount, CELL_STYLE.SUMMARY_AMOUNT, `${COLUMN.PURCHASE}${grandRow}`), value("", CELL_STYLE.SUMMARY_AMOUNT),
     value(snapshot.totals.profitAmount, CELL_STYLE.SUMMARY_AMOUNT),
-    value(snapshot.totals.profitRate / 100, CELL_STYLE.SUMMARY_PERCENT),
+    value(snapshot.totals.profitRate / 100, CELL_STYLE.SUMMARY_PERCENT), value("", CELL_STYLE.SUMMARY_PERCENT),
   ], { height: 25 }));
   sheetRows.push(row(7, emptyRow(), { height: 8 }));
   sheetRows.push(row(8, [value("분류별 집행 현황", CELL_STYLE.META)], { height: 20 }));
   sheetRows.push(row(REPORT.TABLE_HEADER_ROW, [
     value("대분류", CELL_STYLE.TABLE_HEADER),
     value("중분류", CELL_STYLE.TABLE_HEADER),
+    value("소분류", CELL_STYLE.TABLE_HEADER),
     value("연결 품번", CELL_STYLE.TABLE_HEADER),
     value("실행예산", CELL_STYLE.TABLE_HEADER),
     value("매입금액 소계", CELL_STYLE.TABLE_HEADER),
@@ -164,82 +197,117 @@ function buildWorksheet(snapshot, generatedAt) {
     value("비고", CELL_STYLE.TABLE_HEADER),
   ], { height: 24 }));
 
+  const lineStyles = { amount: CELL_STYLE.AMOUNT, percent: CELL_STYLE.PERCENT };
+  const middleSubtotalStyles = { amount: CELL_STYLE.MIDDLE_SUBTOTAL_AMOUNT, percent: CELL_STYLE.MIDDLE_SUBTOTAL_PERCENT };
+  const majorTotalStyles = { amount: CELL_STYLE.SUBTOTAL_AMOUNT, percent: CELL_STYLE.SUBTOTAL_PERCENT };
   let currentRow = REPORT.FIRST_DATA_ROW;
-  const subtotalRows = [];
+  const majorTotalRows = [];
   for (const group of groups) {
     const groupStartRow = currentRow;
-    for (const [lineIndex, line] of group.lines.entries()) {
-      sheetRows.push(row(currentRow, [
-        value(lineIndex === 0 ? group.majorName : "", CELL_STYLE.MAJOR),
-        value(line.middleName, CELL_STYLE.TEXT),
-        value(itemCountText(line.items), CELL_STYLE.ITEM_COUNT),
-        value(line.executionBudget, CELL_STYLE.AMOUNT),
-        value(line.purchaseAmount, CELL_STYLE.AMOUNT),
-        value(line.balanceAmount, CELL_STYLE.AMOUNT, `D${currentRow}-E${currentRow}`),
-        value(line.executionRate / 100, CELL_STYLE.PERCENT, `IF(D${currentRow}=0,0,E${currentRow}/D${currentRow})`),
-        value(line.remark || "", CELL_STYLE.TEXT),
-      ], { height: 22 }));
-      currentRow += 1;
+    // 대분류 합계는 라인 행만 더합니다. 중분류 소계 행까지 범위에 넣으면 이중으로 집계됩니다.
+    const groupLineRows = [];
+    let isFirstMajorRow = true;
+    for (const middle of group.middles) {
+      const middleStartRow = currentRow;
+      for (const line of middle.lines) {
+        sheetRows.push(row(currentRow, [
+          value(isFirstMajorRow ? group.majorName : "", CELL_STYLE.MAJOR),
+          value(currentRow === middleStartRow ? line.middleName : "", middle.hasMinors ? CELL_STYLE.MIDDLE : CELL_STYLE.TEXT),
+          value(line.minorName || "", CELL_STYLE.TEXT),
+          value(itemCountText(line.items), CELL_STYLE.ITEM_COUNT),
+          ...amountValues(currentRow, line, lineStyles),
+          value(line.remark || "", CELL_STYLE.TEXT),
+        ], { height: 22 }));
+        // 소분류가 없는 중분류는 중분류 · 소분류 칸을 합칩니다.
+        if (!middle.hasMinors) merges.push(`B${currentRow}:C${currentRow}`);
+        groupLineRows.push(currentRow);
+        isFirstMajorRow = false;
+        currentRow += 1;
+      }
+      const middleLineEndRow = currentRow - 1;
+      if (middle.showSubtotal) {
+        sheetRows.push(row(currentRow, [
+          value("", CELL_STYLE.MAJOR),
+          value("", CELL_STYLE.MIDDLE),
+          value("소 계", CELL_STYLE.MIDDLE_SUBTOTAL_TEXT),
+          value("", CELL_STYLE.MIDDLE_SUBTOTAL_TEXT),
+          ...amountValues(currentRow, middle.totals, middleSubtotalStyles, {
+            budget: `SUM(${COLUMN.BUDGET}${middleStartRow}:${COLUMN.BUDGET}${middleLineEndRow})`,
+            purchase: `SUM(${COLUMN.PURCHASE}${middleStartRow}:${COLUMN.PURCHASE}${middleLineEndRow})`,
+          }),
+          value("", CELL_STYLE.MIDDLE_SUBTOTAL_TEXT),
+        ], { height: 22 }));
+        currentRow += 1;
+      }
+      if (middle.hasMinors && currentRow - 1 > middleStartRow) merges.push(`B${middleStartRow}:B${currentRow - 1}`);
     }
     const groupEndRow = currentRow - 1;
     if (groupEndRow > groupStartRow) merges.push(`A${groupStartRow}:A${groupEndRow}`);
 
-    const subtotalRow = currentRow;
-    subtotalRows.push(subtotalRow);
-    merges.push(`A${subtotalRow}:C${subtotalRow}`);
-    sheetRows.push(row(subtotalRow, [
-      value(`${group.majorName} 소계 · 중분류 ${group.lines.length.toLocaleString("ko-KR")}개`, CELL_STYLE.SUBTOTAL_TEXT),
+    const totalRow = currentRow;
+    majorTotalRows.push(totalRow);
+    merges.push(`A${totalRow}:D${totalRow}`);
+    sheetRows.push(row(totalRow, [
+      value(`${group.majorName} 합계 · 중분류 ${group.middles.length.toLocaleString("ko-KR")}개`, CELL_STYLE.SUBTOTAL_TEXT),
       value("", CELL_STYLE.SUBTOTAL_TEXT),
       value("", CELL_STYLE.SUBTOTAL_TEXT),
-      value(group.totals.executionBudget, CELL_STYLE.SUBTOTAL_AMOUNT, `SUM(D${groupStartRow}:D${groupEndRow})`),
-      value(group.totals.purchaseAmount, CELL_STYLE.SUBTOTAL_AMOUNT, `SUM(E${groupStartRow}:E${groupEndRow})`),
-      value(group.totals.balanceAmount, CELL_STYLE.SUBTOTAL_AMOUNT, `D${subtotalRow}-E${subtotalRow}`),
-      value(group.totals.executionRate / 100, CELL_STYLE.SUBTOTAL_PERCENT, `IF(D${subtotalRow}=0,0,E${subtotalRow}/D${subtotalRow})`),
+      value("", CELL_STYLE.SUBTOTAL_TEXT),
+      ...amountValues(totalRow, group.totals, majorTotalStyles, {
+        budget: `SUM(${sumArguments(COLUMN.BUDGET, groupLineRows)})`,
+        purchase: `SUM(${sumArguments(COLUMN.PURCHASE, groupLineRows)})`,
+      }),
       value("", CELL_STYLE.SUBTOTAL_TEXT),
     ], { height: 23 }));
     currentRow += 1;
   }
 
-  const totalFormula = (column) => subtotalRows.length ? subtotalRows.map((rowNumber) => `${column}${rowNumber}`).join("+") : "0";
-  merges.push(`A${grandRow}:C${grandRow}`);
+  const totalFormula = (column) => majorTotalRows.length ? majorTotalRows.map((rowNumber) => `${column}${rowNumber}`).join("+") : "0";
+  merges.push(`A${grandRow}:D${grandRow}`);
   sheetRows.push(row(grandRow, [
     value("전체 합계", CELL_STYLE.TOTAL_TEXT),
     value("", CELL_STYLE.TOTAL_TEXT),
     value("", CELL_STYLE.TOTAL_TEXT),
-    value(snapshot.totals.executionBudget, CELL_STYLE.TOTAL_AMOUNT, totalFormula("D")),
-    value(snapshot.totals.purchaseAmount, CELL_STYLE.TOTAL_AMOUNT, totalFormula("E")),
-    value(snapshot.totals.budgetBalance, CELL_STYLE.TOTAL_AMOUNT, `D${grandRow}-E${grandRow}`),
-    value(snapshot.totals.executionBudget === 0 ? 0 : snapshot.totals.purchaseAmount / snapshot.totals.executionBudget, CELL_STYLE.TOTAL_PERCENT, `IF(D${grandRow}=0,0,E${grandRow}/D${grandRow})`),
+    value("", CELL_STYLE.TOTAL_TEXT),
+    ...amountValues(grandRow, {
+      executionBudget: snapshot.totals.executionBudget,
+      purchaseAmount: snapshot.totals.purchaseAmount,
+      balanceAmount: snapshot.totals.budgetBalance,
+      executionRate: snapshot.totals.executionBudget === 0 ? 0 : (snapshot.totals.purchaseAmount / snapshot.totals.executionBudget) * 100,
+    }, { amount: CELL_STYLE.TOTAL_AMOUNT, percent: CELL_STYLE.TOTAL_PERCENT }, {
+      budget: totalFormula(COLUMN.BUDGET),
+      purchase: totalFormula(COLUMN.PURCHASE),
+    }),
     value("", CELL_STYLE.TOTAL_TEXT),
   ], { height: 25 }));
 
-  merges.push(`A${noteRow}:H${noteRow}`, `A${signLabelRow}:D${signBoxRow}`);
+  merges.push(`A${noteRow}:I${noteRow}`, `A${signLabelRow}:E${signBoxRow}`);
   const confirmedNote = snapshot.confirmedBy
     ? ` · 확정 ${snapshot.confirmedBy} (${formatDateTime(snapshot.confirmedAt)})`
     : "";
   sheetRows.push(row(noteRow, [value(`기준: 저장된 스냅샷 v${snapshot.versionNo} · 생성 ${formatDateTime(generatedAt)} · 연결 품번은 건수만 표기${confirmedNote}`, CELL_STYLE.NOTE)], { height: 20 }));
   sheetRows.push(row(signLabelRow, [
     value("본 보고서는 아마란스10 입고 공급가액을 기준으로 작성되었습니다.", CELL_STYLE.NOTE),
-    value("", CELL_STYLE.NOTE), value("", CELL_STYLE.NOTE), value("", CELL_STYLE.NOTE),
+    value("", CELL_STYLE.NOTE), value("", CELL_STYLE.NOTE), value("", CELL_STYLE.NOTE), value("", CELL_STYLE.NOTE),
     value("작성", CELL_STYLE.SIGN_LABEL), value("검토", CELL_STYLE.SIGN_LABEL), value("승인", CELL_STYLE.SIGN_LABEL), value("", CELL_STYLE.SIGN_LABEL),
   ], { height: 20 }));
   sheetRows.push(row(signBoxRow, [
-    value("", CELL_STYLE.NOTE), value("", CELL_STYLE.NOTE), value("", CELL_STYLE.NOTE), value("", CELL_STYLE.NOTE),
+    value("", CELL_STYLE.NOTE), value("", CELL_STYLE.NOTE), value("", CELL_STYLE.NOTE), value("", CELL_STYLE.NOTE), value("", CELL_STYLE.NOTE),
     value("", CELL_STYLE.SIGN_BOX), value("", CELL_STYLE.SIGN_BOX), value("", CELL_STYLE.SIGN_BOX), value("", CELL_STYLE.SIGN_BOX),
   ], { height: 38 }));
 
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <worksheet xmlns="${XLSX_NAMESPACE.MAIN}" xmlns:r="${XLSX_NAMESPACE.RELATIONSHIPS}">
-  <dimension ref="A1:H${signBoxRow}"/>
+  <dimension ref="A1:I${signBoxRow}"/>
   <sheetViews><sheetView showGridLines="0" workbookViewId="0"><pane ySplit="9" topLeftCell="A10" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>
   <sheetFormatPr defaultRowHeight="18"/>
   <cols>
-    <col min="1" max="1" width="13" customWidth="1"/>
-    <col min="2" max="2" width="18" customWidth="1"/>
-    <col min="3" max="3" width="14" customWidth="1"/>
-    <col min="4" max="6" width="17" customWidth="1"/>
-    <col min="7" max="7" width="11" customWidth="1"/>
-    <col min="8" max="8" width="25" customWidth="1"/>
+    <col min="1" max="1" width="12" customWidth="1"/>
+    <col min="2" max="2" width="17" customWidth="1"/>
+    <col min="3" max="3" width="22" customWidth="1"/>
+    <col min="4" max="4" width="11" customWidth="1"/>
+    <col min="5" max="7" width="16" customWidth="1"/>
+    <col min="8" max="8" width="10" customWidth="1"/>
+    <col min="9" max="9" width="22" customWidth="1"/>
   </cols>
   <sheetData>${sheetRows.join("")}</sheetData>
   <mergeCells count="${merges.length}">${merges.map((reference) => `<mergeCell ref="${reference}"/>`).join("")}</mergeCells>
@@ -281,7 +349,7 @@ function buildStyles() {
     <border><left/><right/><top style="medium"><color rgb="FF102042"/></top><bottom style="double"><color rgb="FF102042"/></bottom><diagonal/></border>
   </borders>
   <cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>
-  <cellXfs count="21">
+  <cellXfs count="25">
     <xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>
     <xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>
     <xf numFmtId="0" fontId="4" fillId="0" borderId="0" xfId="0" applyAlignment="1"><alignment horizontal="left" vertical="center"/></xf>
@@ -303,6 +371,10 @@ function buildStyles() {
     <xf numFmtId="0" fontId="4" fillId="0" borderId="0" xfId="0" applyAlignment="1"><alignment horizontal="left" vertical="center" wrapText="1"/></xf>
     <xf numFmtId="0" fontId="3" fillId="4" borderId="2" xfId="0" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>
     <xf numFmtId="0" fontId="0" fillId="0" borderId="2" xfId="0" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>
+    <xf numFmtId="0" fontId="3" fillId="0" borderId="2" xfId="0" applyAlignment="1"><alignment horizontal="left" vertical="center" wrapText="1"/></xf>
+    <xf numFmtId="0" fontId="3" fillId="4" borderId="2" xfId="0" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>
+    <xf numFmtId="164" fontId="3" fillId="4" borderId="2" xfId="0" applyNumberFormat="1" applyAlignment="1"><alignment horizontal="right" vertical="center"/></xf>
+    <xf numFmtId="165" fontId="3" fillId="4" borderId="2" xfId="0" applyNumberFormat="1" applyAlignment="1"><alignment horizontal="right" vertical="center"/></xf>
   </cellXfs>
   <cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>
 </styleSheet>`;
@@ -313,13 +385,13 @@ function buildWorkbook(lastRow) {
 <workbook xmlns="${XLSX_NAMESPACE.MAIN}" xmlns:r="${XLSX_NAMESPACE.RELATIONSHIPS}">
   <bookViews><workbookView xWindow="0" yWindow="0" windowWidth="24000" windowHeight="12000"/></bookViews>
   <sheets><sheet name="${REPORT.SHEET_NAME}" sheetId="1" r:id="rId1"/></sheets>
-  <definedNames><definedName name="_xlnm.Print_Area" localSheetId="0">'${REPORT.SHEET_NAME}'!$A$1:$H$${lastRow}</definedName></definedNames>
+  <definedNames><definedName name="_xlnm.Print_Area" localSheetId="0">'${REPORT.SHEET_NAME}'!$A$1:$I$${lastRow}</definedName></definedNames>
   <calcPr calcId="191029" fullCalcOnLoad="1" forceFullCalc="1"/>
 </workbook>`;
 }
 
 function buildPackageFiles(snapshot, generatedAt) {
-  const lastRow = REPORT.FIRST_DATA_ROW + snapshot.lines.length + groupExecutionLines(snapshot.lines).length + 5;
+  const lastRow = REPORT.FIRST_DATA_ROW + countExecutionRows(groupExecutionLines(snapshot.lines)) + 5;
   const createdAt = generatedAt.toISOString();
   return {
     [XLSX_FILE.CONTENT_TYPES]: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>

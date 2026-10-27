@@ -38,6 +38,8 @@ function contentTypeFor(filePath) {
   if (extension === ".svg") return CONTENT_TYPE.SVG;
   if (extension === ".ico") return CONTENT_TYPE.ICON;
   if (extension === ".png") return "image/png";
+  if (extension === ".webp") return "image/webp";
+  if (extension === ".json") return CONTENT_TYPE.JSON;
   if (extension === ".woff2") return "font/woff2";
   return "application/octet-stream";
 }
