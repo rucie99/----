@@ -117,6 +117,8 @@ button { cursor: pointer; }
 .major-cell { color: var(--navy-900); font-weight: 800; }
 .merged-major-cell { min-width: 90px; border-right: 1px solid var(--slate-200); background: #f8fafc; text-align: center; vertical-align: middle !important; }
 .middle-cell { font-weight: 700; }
+.data-table .merged-middle-cell { min-width: 110px; border-right: 1px solid var(--slate-200); color: var(--navy-900); background: #fbfcfe; font-size: 11px; text-align: left; vertical-align: middle !important; }
+.minor-cell { color: #334155; }
 .item-count { display: inline-flex; min-width: 68px; justify-content: center; padding: 5px 8px; border-radius: 999px; color: #315c9e; background: #eaf2ff; font-size: 9px; font-weight: 800; }
 .item-count.missing { color: var(--slate-500); background: var(--slate-100); }
 .inline-input { width: 120px; min-height: 32px; padding: 5px 8px; border: 1px solid var(--slate-300); border-radius: 6px; text-align: right; }
@@ -130,6 +132,9 @@ button { cursor: pointer; }
 .group-subtotal td { border-top: 1px solid #afbdd1; background: #edf3fa; font-weight: 800; }
 .group-subtotal td:first-child { color: var(--navy-900); }
 .group-subtotal td:first-child span { margin-left: 8px; color: var(--slate-500); font-size: 9px; font-weight: 600; }
+.middle-subtotal td { border-top: 1px dashed #c7d2e1; background: #f5f8fc; font-weight: 700; }
+.middle-subtotal .minor-cell { color: var(--navy-900); letter-spacing: 4px; }
+.middle-progress .progress-bar { background: #6b8fc4; }
 .subtotal-progress .progress-bar { background: #4775b7; }
 .total-progress .progress-bar { background: var(--navy-900); }
 .negative { color: var(--danger); }
@@ -144,7 +149,14 @@ button { cursor: pointer; }
 .intro-actions { display: flex; gap: 8px; align-items: center; flex: 0 0 auto; }
 .settings-intro h2 { margin-top: 5px; font-size: 21px; }
 .settings-intro p:last-child { margin: 7px 0 0; color: var(--slate-500); font-size: 12px; }
-.settings-layout { display: grid; grid-template-columns: minmax(210px, .72fr) minmax(230px, .82fr) minmax(390px, 1.5fr); gap: 14px; align-items: start; }
+.settings-layout { display: grid; grid-template-columns: repeat(3, minmax(250px, 1fr)) minmax(340px, 1.3fr); gap: 14px; align-items: start; }
+/* 네 칸이 좁아지면 대분류 · 중분류 / 소분류 · 품번 연결 2×2 로 접습니다. */
+@media (max-width: 1480px) {
+  .settings-layout { grid-template-columns: 1fr 1fr; }
+  .item-panel { min-height: 420px; }
+}
+.panel-optional { margin-left: 4px; color: var(--slate-500); font-size: 10px; font-weight: 600; }
+.minor-guide { margin: 4px 0 0; color: var(--slate-500); font-size: 11px; line-height: 1.6; }
 .settings-panel { min-height: 560px; overflow: hidden; }
 .step-number { display: inline-grid; place-items: center; width: 24px; height: 24px; border-radius: 7px; color: var(--blue-600); background: var(--blue-100); font-size: 11px; font-weight: 900; }
 .icon-button { display: grid; place-items: center; width: 32px; height: 32px; border: 0; border-radius: 8px; color: #fff; background: var(--blue-600); font-size: 19px; }
@@ -367,8 +379,6 @@ body.can-edit .receipt-toolbar.editor-only { display: flex; }
 
 @media (max-width: 1180px) {
   .summary-grid { grid-template-columns: repeat(2, 1fr); }
-  .settings-layout { grid-template-columns: 1fr 1fr; }
-  .item-panel { grid-column: 1 / -1; min-height: 420px; }
   .integration-layout { grid-template-columns: 1fr; }
   .endpoint-panel, .integration-actions { grid-column: auto; }
 }
@@ -448,12 +458,15 @@ body.can-edit .receipt-toolbar.editor-only { display: flex; }
   .print-detail-table tr { break-inside: avoid; page-break-inside: avoid; }
   .print-detail-table th { height: 8mm; padding: 1.5mm; border: .5pt solid #8796aa; color: #fff; background: #102042; text-align: center; }
   .print-detail-table td { min-height: 7mm; padding: 1.7mm; border: .4pt solid #c4ccd7; white-space: normal; }
-  .print-col-major { width: 21mm; }
-  .print-col-middle { width: 28mm; }
-  .print-col-items { width: 22mm; }
-  .print-col-money { width: 31mm; }
-  .print-col-rate { width: 17mm; }
+  .print-col-major { width: 19mm; }
+  .print-col-middle { width: 27mm; }
+  .print-col-minor { width: 33mm; }
+  .print-col-items { width: 18mm; }
+  .print-col-money { width: 29mm; }
+  .print-col-rate { width: 15mm; }
   .print-major { background: #f6f8fb; font-weight: 800; text-align: center; vertical-align: middle; }
+  .print-middle { background: #fbfcfe; font-weight: 700; vertical-align: middle; }
+  .print-middle-subtotal td { background: #f1f5fa; font-weight: 700; }
   .print-center { text-align: center; }
   .print-number { text-align: right; font-variant-numeric: tabular-nums; }
   .print-subtotal td { border-top: .7pt solid #7c8da5; background: #e8eef7; font-weight: 800; }

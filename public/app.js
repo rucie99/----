@@ -5,6 +5,7 @@ const API = Object.freeze({
   CATEGORIES: "/api/categories",
   MAJOR_CATEGORIES: "/api/major-categories",
   MIDDLE_CATEGORIES: "/api/middle-categories",
+  MINOR_CATEGORIES: "/api/minor-categories",
   ITEM_MAPPINGS: "/api/item-mappings",
   ITEM_SEARCH: "/api/amarance/items/search",
   AMARANCE_SETTINGS: "/api/amarance/settings",
@@ -66,6 +67,7 @@ const state = {
   selectedProjectId: null,
   selectedMajorId: null,
   selectedMiddleId: null,
+  selectedMinorId: null,
   amaranceSettings: null,
   ssoSettings: null,
   securitySettings: null,
@@ -432,7 +434,7 @@ function renderSummary() {
 
   elements.statementTotals.innerHTML = `
     <tr>
-      <td colspan="3">전체 합계</td>
+      <td colspan="4">전체 합계</td>
       <td class="number-cell">${formatWon(totals.executionBudget)}</td>
       <td class="number-cell">${formatWon(totals.purchaseAmount)}</td>
       <td class="number-cell">${amountCellMarkup(totals.balanceAmount)}</td>
@@ -464,18 +466,35 @@ function renderStatementRows() {
   const snapshot = state.snapshot;
   const editable = snapshot.status === SNAPSHOT_STATUS.DRAFT && state.permissions.canEdit;
   if (snapshot.lines.length === 0) {
-    elements.statementRows.innerHTML = '<tr><td class="empty-row" colspan="8">이 버전에 포함된 중분류가 없습니다.</td></tr>';
+    elements.statementRows.innerHTML = '<tr><td class="empty-row" colspan="9">이 버전에 포함된 중분류가 없습니다.</td></tr>';
     return;
   }
   const groups = groupExecutionLines(snapshot.lines);
-  elements.statementRows.innerHTML = groups.map((group) => {
-    const lines = group.lines.map((line, index) => `
+  elements.statementRows.innerHTML = groups.map((group, groupIndex) => {
+    // 대분류 칸은 라인과 중분류 소계 행을 모두 덮고, 대분류 합계 행은 그 아래에 따로 둡니다.
+    const majorRowSpan = group.middles.reduce((sum, middle) => sum + middle.lines.length + (middle.showSubtotal ? 1 : 0), 0);
+    let majorCell = `<th scope="rowgroup" class="major-cell merged-major-cell" rowspan="${majorRowSpan}">${escapeHtml(group.majorName)}</th>`;
+    const takeMajorCell = () => {
+      const markup = majorCell;
+      majorCell = "";
+      return markup;
+    };
+    const middleRows = group.middles.map((middle, middleIndex) => {
+      const middleRowSpan = middle.lines.length + (middle.showSubtotal ? 1 : 0);
+      const lines = middle.lines.map((line, lineIndex) => {
+        // 소분류가 없는 중분류는 중분류 · 소분류 두 칸을 합쳐 한 줄로 보입니다.
+        const categoryCells = middle.hasMinors
+          ? `${lineIndex === 0 ? `<th scope="rowgroup" class="middle-cell merged-middle-cell" rowspan="${middleRowSpan}">${escapeHtml(middle.middleName)}</th>` : ""}
+             <td class="minor-cell">${escapeHtml(line.minorName)}</td>`
+          : `<td class="middle-cell" colspan="2">${escapeHtml(line.middleName)}</td>`;
+        const label = escapeHtml(line.minorName || line.middleName);
+        return `
       <tr class="statement-line" data-line-id="${line.id}">
-        ${index === 0 ? `<th scope="rowgroup" class="major-cell merged-major-cell" rowspan="${group.lines.length}">${escapeHtml(group.majorName)}</th>` : ""}
-        <td class="middle-cell">${escapeHtml(line.middleName)}</td>
+        ${takeMajorCell()}
+        ${categoryCells}
         <td><span class="item-count ${line.items.length ? "" : "missing"}">${itemCountText(line.items)}</span></td>
         <td class="number-cell">
-          <label class="visually-hidden" for="budget-${line.id}">${escapeHtml(line.middleName)} 실행예산</label>
+          <label class="visually-hidden" for="budget-${line.id}">${label} 실행예산</label>
           <input id="budget-${line.id}" class="inline-input budget-input" type="text" inputmode="numeric" autocomplete="off"
                  value="${Number(line.executionBudget).toLocaleString("ko-KR")}" ${editable ? "" : "disabled"}>
         </td>
@@ -483,22 +502,46 @@ function renderStatementRows() {
         <td class="number-cell balance-cell">${amountCellMarkup(line.balanceAmount)}</td>
         <td class="rate-cell">${progressMarkup(line.executionRate)}</td>
         <td>
-          <label class="visually-hidden" for="remark-${line.id}">${escapeHtml(line.middleName)} 비고</label>
+          <label class="visually-hidden" for="remark-${line.id}">${label} 비고</label>
           <input id="remark-${line.id}" class="inline-input remark-input" value="${escapeHtml(line.remark)}" maxlength="200" ${editable ? "" : "disabled"}>
         </td>
-      </tr>`).join("");
-    return `${lines}
-      <tr class="group-subtotal" data-subtotal="${escapeHtml(group.majorName)}">
-        <td colspan="3"><strong>${escapeHtml(group.majorName)} 소계</strong><span>중분류 ${group.lines.length.toLocaleString("ko-KR")}개</span></td>
-        <td class="number-cell subtotal-budget">${formatWon(group.totals.executionBudget)}</td>
-        <td class="number-cell subtotal-purchase">${formatWon(group.totals.purchaseAmount)}</td>
-        <td class="number-cell subtotal-balance">${amountCellMarkup(group.totals.balanceAmount)}</td>
-        <td class="subtotal-rate">${progressMarkup(group.totals.executionRate, "subtotal-progress")}</td>
+      </tr>`;
+      }).join("");
+      if (!middle.showSubtotal) return lines;
+      return `${lines}
+      <tr class="middle-subtotal" data-middle-subtotal="${groupIndex}-${middleIndex}">
+        <td class="minor-cell">소계</td>
+        <td></td>
+        ${subtotalCellsMarkup(middle.totals, "middle-progress")}
+        <td></td>
+      </tr>`;
+    }).join("");
+    return `${middleRows}
+      <tr class="group-subtotal" data-subtotal="${groupIndex}">
+        <td colspan="4"><strong>${escapeHtml(group.majorName)} 합계</strong><span>중분류 ${group.middles.length.toLocaleString("ko-KR")}개</span></td>
+        ${subtotalCellsMarkup(group.totals, "subtotal-progress")}
         <td></td>
       </tr>`;
   }).join("");
   applyProgressWidths(elements.statementRows);
   attachStatementInputEvents();
+}
+
+/** 중분류 소계 · 대분류 합계 행의 금액 칸 네 개. */
+function subtotalCellsMarkup(totals, progressClass) {
+  return `
+        <td class="number-cell subtotal-budget">${formatWon(totals.executionBudget)}</td>
+        <td class="number-cell subtotal-purchase">${formatWon(totals.purchaseAmount)}</td>
+        <td class="number-cell subtotal-balance">${amountCellMarkup(totals.balanceAmount)}</td>
+        <td class="subtotal-rate">${progressMarkup(totals.executionRate, progressClass)}</td>`;
+}
+
+function updateSubtotalCells(row, totals, progressClass) {
+  if (!row) return;
+  row.querySelector(".subtotal-budget").textContent = formatWon(totals.executionBudget);
+  row.querySelector(".subtotal-purchase").textContent = formatWon(totals.purchaseAmount);
+  row.querySelector(".subtotal-balance").innerHTML = amountCellMarkup(totals.balanceAmount);
+  row.querySelector(".subtotal-rate").innerHTML = progressMarkup(totals.executionRate, progressClass);
 }
 
 /**
@@ -516,14 +559,13 @@ function refreshDerivedCells() {
     row.querySelector(".balance-cell").innerHTML = amountCellMarkup(line.balanceAmount);
     row.querySelector(".rate-cell").innerHTML = progressMarkup(line.executionRate);
   }
-  for (const group of groupExecutionLines(lines)) {
-    const row = elements.statementRows.querySelector(`[data-subtotal="${CSS.escape(group.majorName)}"]`);
-    if (!row) continue;
-    row.querySelector(".subtotal-budget").textContent = formatWon(group.totals.executionBudget);
-    row.querySelector(".subtotal-purchase").textContent = formatWon(group.totals.purchaseAmount);
-    row.querySelector(".subtotal-balance").innerHTML = amountCellMarkup(group.totals.balanceAmount);
-    row.querySelector(".subtotal-rate").innerHTML = progressMarkup(group.totals.executionRate, "subtotal-progress");
-  }
+  groupExecutionLines(lines).forEach((group, groupIndex) => {
+    group.middles.forEach((middle, middleIndex) => {
+      if (!middle.showSubtotal) return;
+      updateSubtotalCells(elements.statementRows.querySelector(`[data-middle-subtotal="${groupIndex}-${middleIndex}"]`), middle.totals, "middle-progress");
+    });
+    updateSubtotalCells(elements.statementRows.querySelector(`[data-subtotal="${groupIndex}"]`), group.totals, "subtotal-progress");
+  });
   applyProgressWidths(elements.statementRows);
   renderSummary();
 }
@@ -727,25 +769,44 @@ function renderPrintReport() {
   const profitAmount = snapshot.contractAmount - overallTotals.purchaseAmount;
   const profitRate = snapshot.contractAmount === 0 ? 0 : (profitAmount / snapshot.contractAmount) * 100;
 
+  const printTotalsCells = (totals) => `
+        <td class="print-number">${formatWon(totals.executionBudget)}</td>
+        <td class="print-number">${formatWon(totals.purchaseAmount)}</td>
+        <td class="print-number ${totals.balanceAmount < 0 ? "negative" : ""}">${formatWon(totals.balanceAmount)}</td>
+        <td class="print-number">${formatPercent(totals.executionRate)}</td>`;
   const detailRows = groups.map((group) => {
-    const rows = group.lines.map((line, index) => `
+    const majorRowSpan = group.middles.reduce((sum, middle) => sum + middle.lines.length + (middle.showSubtotal ? 1 : 0), 0);
+    let majorCell = `<td class="print-major" rowspan="${majorRowSpan}">${escapeHtml(group.majorName)}</td>`;
+    const rows = group.middles.map((middle) => {
+      const middleRowSpan = middle.lines.length + (middle.showSubtotal ? 1 : 0);
+      const lines = middle.lines.map((line, lineIndex) => {
+        const categoryCells = middle.hasMinors
+          ? `${lineIndex === 0 ? `<td class="print-middle" rowspan="${middleRowSpan}">${escapeHtml(middle.middleName)}</td>` : ""}<td>${escapeHtml(line.minorName)}</td>`
+          : `<td colspan="2">${escapeHtml(line.middleName)}</td>`;
+        const markup = `
       <tr>
-        ${index === 0 ? `<td class="print-major" rowspan="${group.lines.length}">${escapeHtml(group.majorName)}</td>` : ""}
-        <td>${escapeHtml(line.middleName)}</td>
+        ${majorCell}
+        ${categoryCells}
         <td class="print-center">${itemCountText(line.items)}</td>
-        <td class="print-number">${formatWon(line.executionBudget)}</td>
-        <td class="print-number">${formatWon(line.purchaseAmount)}</td>
-        <td class="print-number ${line.balanceAmount < 0 ? "negative" : ""}">${formatWon(line.balanceAmount)}</td>
-        <td class="print-number">${formatPercent(line.executionRate)}</td>
+        ${printTotalsCells(line)}
         <td>${escapeHtml(line.remark || "")}</td>
-      </tr>`).join("");
+      </tr>`;
+        majorCell = "";
+        return markup;
+      }).join("");
+      if (!middle.showSubtotal) return lines;
+      return `${lines}
+      <tr class="print-middle-subtotal">
+        <td class="print-center">소 계</td>
+        <td></td>
+        ${printTotalsCells(middle.totals)}
+        <td></td>
+      </tr>`;
+    }).join("");
     return `${rows}
       <tr class="print-subtotal">
-        <td colspan="3">${escapeHtml(group.majorName)} 소계 · 중분류 ${group.lines.length.toLocaleString("ko-KR")}개</td>
-        <td class="print-number">${formatWon(group.totals.executionBudget)}</td>
-        <td class="print-number">${formatWon(group.totals.purchaseAmount)}</td>
-        <td class="print-number ${group.totals.balanceAmount < 0 ? "negative" : ""}">${formatWon(group.totals.balanceAmount)}</td>
-        <td class="print-number">${formatPercent(group.totals.executionRate)}</td>
+        <td colspan="4">${escapeHtml(group.majorName)} 합계 · 중분류 ${group.middles.length.toLocaleString("ko-KR")}개</td>
+        ${printTotalsCells(group.totals)}
         <td></td>
       </tr>`;
   }).join("");
@@ -777,11 +838,11 @@ function renderPrintReport() {
       <div><span>예상 이익률</span><strong>${formatPercent(profitRate)}</strong></div>
     </div>
     <table class="print-detail-table">
-      <colgroup><col class="print-col-major"><col class="print-col-middle"><col class="print-col-items"><col class="print-col-money"><col class="print-col-money"><col class="print-col-money"><col class="print-col-rate"><col></colgroup>
-      <thead><tr><th>대분류</th><th>중분류</th><th>연결 품번</th><th>실행예산</th><th>매입금액 소계</th><th>예산잔액</th><th>집행률</th><th>비고</th></tr></thead>
-      <tbody>${detailRows || '<tr><td colspan="8" class="print-empty">이 버전에 포함된 중분류가 없습니다.</td></tr>'}</tbody>
+      <colgroup><col class="print-col-major"><col class="print-col-middle"><col class="print-col-minor"><col class="print-col-items"><col class="print-col-money"><col class="print-col-money"><col class="print-col-money"><col class="print-col-rate"><col></colgroup>
+      <thead><tr><th>대분류</th><th>중분류</th><th>소분류</th><th>연결 품번</th><th>실행예산</th><th>매입금액 소계</th><th>예산잔액</th><th>집행률</th><th>비고</th></tr></thead>
+      <tbody>${detailRows || '<tr><td colspan="9" class="print-empty">이 버전에 포함된 중분류가 없습니다.</td></tr>'}</tbody>
       <tfoot><tr>
-        <td colspan="3">전체 합계</td>
+        <td colspan="4">전체 합계</td>
         <td class="print-number">${formatWon(overallTotals.executionBudget)}</td>
         <td class="print-number">${formatWon(overallTotals.purchaseAmount)}</td>
         <td class="print-number ${overallTotals.balanceAmount < 0 ? "negative" : ""}">${formatWon(overallTotals.balanceAmount)}</td>
@@ -790,7 +851,7 @@ function renderPrintReport() {
       </tr></tfoot>
     </table>
     <div class="print-report-footer">
-      <span>연결 품번은 상세 코드 대신 중분류별 건수로 표기했습니다. · ${confirmedNote}</span>
+      <span>연결 품번은 상세 코드 대신 분류별 건수로 표기했습니다. · ${confirmedNote}</span>
       <span>출력 ${formatDateTime(new Date())} · ${escapeHtml(state.user?.name || "")}</span>
     </div>`;
 }
@@ -822,7 +883,7 @@ function renderCategorySets() {
   elements.categorySetBadge.textContent = selected?.isCurrent ? "사용 중" : "보관";
   elements.categorySetBadge.className = `badge ${selected?.isCurrent ? "confirmed" : "draft"}`;
   elements.categorySetMeta.textContent = selected
-    ? `대분류 ${selected.majorCount} · 중분류 ${selected.middleCount} · 품번 ${selected.itemCount}`
+    ? `대분류 ${selected.majorCount} · 중분류 ${selected.middleCount} · 소분류 ${selected.minorCount} · 품번 ${selected.itemCount}`
       + ` · 이 설정으로 만든 집행서 ${selected.snapshotCount}건`
       + ` · 수정 ${formatDateTime(selected.updatedAt)}`
     : "";
@@ -851,6 +912,7 @@ async function loadSelectedCategorySet() {
   state.categories = await api(`${API.CATEGORIES}?categorySetId=${state.selectedCategorySetId}`);
   state.selectedMajorId = null;
   state.selectedMiddleId = null;
+  state.selectedMinorId = null;
   elements.itemSearchResults.classList.add("hidden");
   renderSettings();
 }
@@ -907,7 +969,7 @@ async function deleteCategorySet() {
   if (!set) return;
   const confirmed = await askConfirm({
     title: "설정 버전 삭제",
-    message: `${categorySetLabel(set)} 과(와) 그 안의 대분류 ${set.majorCount}개 · 중분류 ${set.middleCount}개 · 품번 ${set.itemCount}개를 삭제합니다.`
+    message: `${categorySetLabel(set)} 과(와) 그 안의 대분류 ${set.majorCount}개 · 중분류 ${set.middleCount}개 · 소분류 ${set.minorCount}개 · 품번 ${set.itemCount}개를 삭제합니다.`
       + " 이 설정으로 만든 집행서가 없을 때만 지울 수 있습니다. 삭제할까요?",
     confirmLabel: "삭제",
     danger: true,
@@ -929,11 +991,22 @@ function selectedMiddle() {
   return selectedMajor()?.middleCategories.find((middle) => middle.id === Number(state.selectedMiddleId));
 }
 
+function selectedMinor() {
+  return selectedMiddle()?.minorCategories.find((minor) => minor.id === Number(state.selectedMinorId));
+}
+
+/** 중분류에 바로 붙은 품번과 소분류에 붙은 품번을 모두 셉니다. */
+function middleItemCount(middle) {
+  return middle.items.length + middle.minorCategories.reduce((sum, minor) => sum + minor.items.length, 0);
+}
+
 function renderSettings() {
   if (!selectedMajor() && state.categories.length) state.selectedMajorId = state.categories[0].id;
   if (!selectedMiddle() && selectedMajor()?.middleCategories.length) state.selectedMiddleId = selectedMajor().middleCategories[0].id;
+  if (!selectedMinor()) state.selectedMinorId = selectedMiddle()?.minorCategories[0]?.id || null;
   renderMajorList();
   renderMiddleList();
+  renderMinorList();
   renderMappedItems();
 }
 
@@ -952,6 +1025,7 @@ function renderMajorList() {
   elements.majorList.querySelectorAll(".select-major").forEach((button) => button.addEventListener("click", () => {
     state.selectedMajorId = Number(button.closest(".master-row").dataset.majorId);
     state.selectedMiddleId = selectedMajor()?.middleCategories[0]?.id || null;
+    state.selectedMinorId = null;
     elements.itemSearchResults.classList.add("hidden");
     renderSettings();
   }));
@@ -967,7 +1041,8 @@ function renderMiddleList() {
   elements.middleList.innerHTML = middles.length ? middles.map((middle, index) => `
     <div class="master-row ${middle.id === Number(state.selectedMiddleId) ? "selected" : ""}" data-middle-id="${middle.id}">
       <button class="select-middle">${escapeHtml(middle.name)}</button>
-      <span class="count" title="연결 품번 수">${middle.items.length}</span>
+      ${middle.minorCategories.length ? `<span class="count" title="소분류 수">소 ${middle.minorCategories.length}</span>` : ""}
+      <span class="count" title="연결 품번 수">${middleItemCount(middle)}</span>
       <button class="row-action move-middle" data-direction="up" aria-label="위로" ${index === 0 ? "disabled" : ""}>▲</button>
       <button class="row-action move-middle" data-direction="down" aria-label="아래로" ${index === middles.length - 1 ? "disabled" : ""}>▼</button>
       <button class="row-action edit-middle">수정</button>
@@ -977,6 +1052,7 @@ function renderMiddleList() {
 
   elements.middleList.querySelectorAll(".select-middle").forEach((button) => button.addEventListener("click", () => {
     state.selectedMiddleId = Number(button.closest(".master-row").dataset.middleId);
+    state.selectedMinorId = null;
     elements.itemSearchResults.classList.add("hidden");
     renderSettings();
   }));
@@ -986,15 +1062,55 @@ function renderMiddleList() {
   elements.middleList.querySelectorAll(".delete-middle").forEach((button) => button.addEventListener("click", () => deleteMiddle(button.closest(".master-row"))));
 }
 
-function renderMappedItems() {
+function renderMinorList() {
   const middle = selectedMiddle();
-  if (!middle) {
-    elements.mappedItemList.innerHTML = '<div class="settings-placeholder">품번을 연결할 중분류를 선택하세요.</div>';
+  const minors = middle?.minorCategories || [];
+  elements.minorList.innerHTML = minors.length ? minors.map((minor, index) => `
+    <div class="master-row ${minor.id === Number(state.selectedMinorId) ? "selected" : ""}" data-minor-id="${minor.id}">
+      <button class="select-minor">${escapeHtml(minor.name)}</button>
+      <span class="count" title="연결 품번 수">${minor.items.length}</span>
+      <button class="row-action move-minor" data-direction="up" aria-label="위로" ${index === 0 ? "disabled" : ""}>▲</button>
+      <button class="row-action move-minor" data-direction="down" aria-label="아래로" ${index === minors.length - 1 ? "disabled" : ""}>▼</button>
+      <button class="row-action edit-minor">수정</button>
+      <button class="row-action danger delete-minor">삭제</button>
+    </div>
+  `).join("") + (minors.length >= 2 ? `<p class="minor-guide">집행서에 '${escapeHtml(middle.name)} 소계'가 표시됩니다.</p>` : "")
+    : `<div class="settings-placeholder">${middle
+      ? "소분류가 없습니다.<br>소분류 없이 중분류에 바로 품번을 연결해도 됩니다.<br>중분류 소계가 필요하면 ＋로 소분류를 추가하세요."
+      : "먼저 중분류를 선택하세요."}</div>`;
+
+  elements.minorList.querySelectorAll(".select-minor").forEach((button) => button.addEventListener("click", () => {
+    state.selectedMinorId = Number(button.closest(".master-row").dataset.minorId);
+    elements.itemSearchResults.classList.add("hidden");
+    renderSettings();
+  }));
+  elements.minorList.querySelectorAll(".move-minor").forEach((button) => button.addEventListener("click", () =>
+    moveCategory("minor", Number(button.closest(".master-row").dataset.minorId), button.dataset.direction)));
+  elements.minorList.querySelectorAll(".edit-minor").forEach((button) => button.addEventListener("click", () => editMinor(button.closest(".master-row"))));
+  elements.minorList.querySelectorAll(".delete-minor").forEach((button) => button.addEventListener("click", () => deleteMinor(button.closest(".master-row"))));
+}
+
+/** 품번을 연결할 대상: 소분류가 있으면 선택한 소분류, 없으면 중분류. */
+function itemMappingTarget() {
+  const middle = selectedMiddle();
+  if (!middle) return null;
+  if (!middle.minorCategories.length) {
+    return { path: [selectedMajor().name, middle.name], items: middle.items, body: { middleCategoryId: middle.id } };
+  }
+  const minor = selectedMinor();
+  if (!minor) return null;
+  return { path: [selectedMajor().name, middle.name, minor.name], items: minor.items, body: { minorCategoryId: minor.id } };
+}
+
+function renderMappedItems() {
+  const target = itemMappingTarget();
+  if (!target) {
+    elements.mappedItemList.innerHTML = '<div class="settings-placeholder">품번을 연결할 중분류(소분류가 있으면 소분류)를 선택하세요.</div>';
     return;
   }
   elements.mappedItemList.innerHTML =
-    `<p class="mapped-heading">${escapeHtml(selectedMajor().name)} 〉 ${escapeHtml(middle.name)} · ${middle.items.length}개 품번</p>`
-    + (middle.items.length ? middle.items.map((item) => `
+    `<p class="mapped-heading">${target.path.map(escapeHtml).join(" 〉 ")} · ${target.items.length}개 품번</p>`
+    + (target.items.length ? target.items.map((item) => `
       <div class="mapped-row" data-item-id="${item.id}">
         <code>${escapeHtml(item.itemCode)}</code><span>${escapeHtml(item.itemName)}</span>
         <button class="row-action danger delete-item">연결 해제</button>
@@ -1011,7 +1127,7 @@ async function refreshCategories() {
 }
 
 async function moveCategory(kind, id, direction) {
-  const endpoint = kind === "major" ? API.MAJOR_CATEGORIES : API.MIDDLE_CATEGORIES;
+  const endpoint = { major: API.MAJOR_CATEGORIES, middle: API.MIDDLE_CATEGORIES, minor: API.MINOR_CATEGORIES }[kind];
   const result = await busy(() => api(`${endpoint}/${id}/move`, { method: "POST", body: JSON.stringify({ direction }) }));
   state.categories = result.categories;
   renderSettings();
@@ -1076,15 +1192,69 @@ async function deleteMiddle(row) {
   const middle = selectedMajor().middleCategories.find((item) => item.id === Number(row.dataset.middleId));
   const confirmed = await askConfirm({
     title: "중분류 삭제",
-    message: `'${middle.name}' 중분류와 연결된 품번 ${middle.items.length}개가 삭제됩니다. 이미 만들어진 집행서 버전에는 영향을 주지 않습니다. 삭제할까요?`,
+    message: `'${middle.name}' 중분류`
+      + (middle.minorCategories.length ? `와 그 아래 소분류 ${middle.minorCategories.length}개,` : "와")
+      + ` 연결된 품번 ${middleItemCount(middle)}개가 삭제됩니다. 이미 만들어진 집행서 버전에는 영향을 주지 않습니다. 삭제할까요?`,
     confirmLabel: "삭제",
     danger: true,
   });
   if (!confirmed) return;
   await busy(() => api(`${API.MIDDLE_CATEGORIES}/${middle.id}`, { method: "DELETE" }));
   state.selectedMiddleId = null;
+  state.selectedMinorId = null;
   await refreshCategories();
   showToast("중분류를 삭제했습니다.");
+}
+
+async function addMinor() {
+  const middle = selectedMiddle();
+  if (!middle) return showToast("먼저 중분류를 선택해 주세요.", true);
+  const name = await askText({ title: "소분류 추가", label: `${middle.name}의 소분류명` });
+  if (!name) return;
+  // 소분류가 생기면 품번은 소분류에만 연결되므로, 중분류에 바로 붙어 있던 품번은 첫 소분류로 옮겨집니다.
+  if (middle.minorCategories.length === 0 && middle.items.length > 0) {
+    const confirmed = await askConfirm({
+      title: "첫 소분류 추가",
+      message: `'${middle.name}' 중분류에 연결된 품번 ${middle.items.length}개가 새 소분류 '${name}'(으)로 옮겨집니다.`
+        + " 소분류가 생긴 중분류는 소분류마다 실행예산을 입력하고, 소분류가 2개 이상이면 집행서에 중분류 소계가 표시됩니다. 계속할까요?",
+      confirmLabel: "추가",
+    });
+    if (!confirmed) return;
+  }
+  const created = await busy(() => api(API.MINOR_CATEGORIES, { method: "POST", body: JSON.stringify({ middleCategoryId: middle.id, name }) }));
+  state.selectedMinorId = created.id;
+  await refreshCategories();
+  showToast(created.movedItemCount
+    ? `소분류를 추가하고 품번 ${created.movedItemCount}개를 옮겼습니다.`
+    : "소분류를 추가했습니다.");
+}
+
+async function editMinor(row) {
+  const minor = selectedMiddle().minorCategories.find((item) => item.id === Number(row.dataset.minorId));
+  const name = await askText({ title: "소분류 수정", label: "소분류명", initial: minor.name });
+  if (!name || name === minor.name) return;
+  await busy(() => api(`${API.MINOR_CATEGORIES}/${minor.id}`, { method: "PUT", body: JSON.stringify({ name }) }));
+  await refreshCategories();
+  showToast("소분류를 수정했습니다.");
+}
+
+async function deleteMinor(row) {
+  const middle = selectedMiddle();
+  const minor = middle.minorCategories.find((item) => item.id === Number(row.dataset.minorId));
+  const lastNotice = middle.minorCategories.length === 1
+    ? " 마지막 소분류를 지우면 이 중분류는 다시 품번을 바로 연결하는 한 줄 중분류가 됩니다."
+    : "";
+  const confirmed = await askConfirm({
+    title: "소분류 삭제",
+    message: `'${minor.name}' 소분류와 연결된 품번 ${minor.items.length}개가 삭제됩니다.${lastNotice} 이미 만들어진 집행서 버전에는 영향을 주지 않습니다. 삭제할까요?`,
+    confirmLabel: "삭제",
+    danger: true,
+  });
+  if (!confirmed) return;
+  await busy(() => api(`${API.MINOR_CATEGORIES}/${minor.id}`, { method: "DELETE" }));
+  state.selectedMinorId = null;
+  await refreshCategories();
+  showToast("소분류를 삭제했습니다.");
 }
 
 async function searchItems() {
@@ -1110,9 +1280,9 @@ async function searchItems() {
 }
 
 async function addItem(itemCode, itemName) {
-  const middle = selectedMiddle();
-  if (!middle) return showToast("품번을 연결할 중분류를 선택해 주세요.", true);
-  await busy(() => api(API.ITEM_MAPPINGS, { method: "POST", body: JSON.stringify({ middleCategoryId: middle.id, itemCode, itemName }) }));
+  const target = itemMappingTarget();
+  if (!target) return showToast("품번을 연결할 중분류(소분류가 있으면 소분류)를 선택해 주세요.", true);
+  await busy(() => api(API.ITEM_MAPPINGS, { method: "POST", body: JSON.stringify({ ...target.body, itemCode, itemName }) }));
   await refreshCategories();
   await ignoreFailure(searchItems());
   showToast(`${itemCode} 품번을 연결했습니다.`);
@@ -1526,6 +1696,7 @@ elements.resetDialogForm.addEventListener("submit", async (event) => {
 
 elements.addMajorButton.addEventListener("click", () => ignoreFailure(addMajor()));
 elements.addMiddleButton.addEventListener("click", () => ignoreFailure(addMiddle()));
+elements.addMinorButton.addEventListener("click", () => ignoreFailure(addMinor()));
 elements.itemSearchButton.addEventListener("click", () => ignoreFailure(searchItems()));
 elements.itemSearchInput.addEventListener("keydown", (event) => {
   if (event.key === "Enter" && !event.isComposing) {

@@ -120,10 +120,19 @@ export class AppDatabase {
         is_active INTEGER NOT NULL DEFAULT 1,
         UNIQUE(major_category_id, name)
       );
+      CREATE TABLE IF NOT EXISTS minor_categories (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        middle_category_id INTEGER NOT NULL REFERENCES middle_categories(id) ON DELETE CASCADE,
+        name TEXT NOT NULL,
+        sort_order INTEGER NOT NULL DEFAULT 0,
+        is_active INTEGER NOT NULL DEFAULT 1,
+        UNIQUE(middle_category_id, name)
+      );
       CREATE TABLE IF NOT EXISTS item_mappings (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         category_set_id INTEGER NOT NULL REFERENCES category_sets(id) ON DELETE CASCADE,
         middle_category_id INTEGER NOT NULL REFERENCES middle_categories(id) ON DELETE CASCADE,
+        minor_category_id INTEGER REFERENCES minor_categories(id) ON DELETE CASCADE,
         item_code TEXT NOT NULL,
         item_name TEXT NOT NULL,
         UNIQUE(category_set_id, item_code)
@@ -151,8 +160,10 @@ export class AppDatabase {
         snapshot_id INTEGER NOT NULL REFERENCES snapshots(id) ON DELETE CASCADE,
         major_name TEXT NOT NULL,
         middle_name TEXT NOT NULL,
+        minor_name TEXT NOT NULL DEFAULT '',
         major_sort INTEGER NOT NULL,
         middle_sort INTEGER NOT NULL,
+        minor_sort INTEGER NOT NULL DEFAULT 0,
         execution_budget INTEGER NOT NULL DEFAULT 0,
         remark TEXT NOT NULL DEFAULT ''
       );
@@ -293,6 +304,17 @@ export class AppDatabase {
       if (items > 0) this.logger.info(`스냅샷 품번 ${items}건에 중복 방지 인덱스를 적용했습니다.`);
     }
     this.db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_snapshot_items_unique ON snapshot_items(snapshot_id, item_code)");
+
+    // 중분류 아래 소분류를 둘 수 있게 합니다. 소분류가 없던 기존 데이터는 그대로 '중분류 한 줄'로 보입니다.
+    if (!this.columnNames("item_mappings").has("minor_category_id")) {
+      this.db.exec("ALTER TABLE item_mappings ADD COLUMN minor_category_id INTEGER REFERENCES minor_categories(id) ON DELETE CASCADE");
+    }
+    const lineColumns = this.columnNames("snapshot_lines");
+    if (!lineColumns.has("minor_name")) {
+      this.db.exec("ALTER TABLE snapshot_lines ADD COLUMN minor_name TEXT NOT NULL DEFAULT ''");
+      this.db.exec("ALTER TABLE snapshot_lines ADD COLUMN minor_sort INTEGER NOT NULL DEFAULT 0");
+    }
+    this.db.exec("CREATE INDEX IF NOT EXISTS idx_item_mappings_minor ON item_mappings(minor_category_id)");
     // 세트 소속 컬럼이 갖춰진 뒤에 만들어야 합니다.
     this.db.exec("CREATE INDEX IF NOT EXISTS idx_major_categories_set ON major_categories(category_set_id)");
     this.db.exec("CREATE INDEX IF NOT EXISTS idx_item_mappings_set ON item_mappings(category_set_id)");
@@ -787,6 +809,19 @@ export class AppDatabase {
     return row.categorySetId;
   }
 
+  /** 소분류의 상위 중분류와 설정 버전을 찾습니다. */
+  minorCategoryContext(minorCategoryId) {
+    const row = this.db.prepare(`
+      SELECT mn.middle_category_id AS middleCategoryId, jc.category_set_id AS categorySetId
+      FROM minor_categories mn
+      JOIN middle_categories mc ON mc.id = mn.middle_category_id
+      JOIN major_categories jc ON jc.id = mc.major_category_id
+      WHERE mn.id = ?
+    `).get(minorCategoryId);
+    if (!row) throw notFound("소분류를 찾을 수 없습니다.");
+    return row;
+  }
+
   categorySetIdOfMajor(majorCategoryId) {
     const row = this.db.prepare("SELECT category_set_id AS categorySetId FROM major_categories WHERE id = ?").get(majorCategoryId);
     if (!row) throw notFound("대분류를 찾을 수 없습니다.");
@@ -805,6 +840,10 @@ export class AppDatabase {
              (SELECT COUNT(*) FROM middle_categories mc
                 JOIN major_categories jc2 ON jc2.id = mc.major_category_id
                WHERE jc2.category_set_id = cs.id) AS middleCount,
+             (SELECT COUNT(*) FROM minor_categories mn
+                JOIN middle_categories mc3 ON mc3.id = mn.middle_category_id
+                JOIN major_categories jc3 ON jc3.id = mc3.major_category_id
+               WHERE jc3.category_set_id = cs.id) AS minorCount,
              (SELECT COUNT(*) FROM item_mappings im WHERE im.category_set_id = cs.id) AS itemCount,
              (SELECT COUNT(*) FROM snapshots s WHERE s.category_set_id = cs.id) AS snapshotCount
       FROM category_sets cs ORDER BY cs.version_no DESC
@@ -825,15 +864,23 @@ export class AppDatabase {
         const source = this.assertCategorySet(cloneFromId);
         const insertMajor = this.db.prepare("INSERT INTO major_categories (category_set_id, name, sort_order, is_active) VALUES (?, ?, ?, ?)");
         const insertMiddle = this.db.prepare("INSERT INTO middle_categories (major_category_id, name, sort_order, is_active) VALUES (?, ?, ?, ?)");
-        const insertItem = this.db.prepare("INSERT INTO item_mappings (category_set_id, middle_category_id, item_code, item_name) VALUES (?, ?, ?, ?)");
+        const insertMinor = this.db.prepare("INSERT INTO minor_categories (middle_category_id, name, sort_order, is_active) VALUES (?, ?, ?, ?)");
+        const insertItem = this.db.prepare("INSERT INTO item_mappings (category_set_id, middle_category_id, minor_category_id, item_code, item_name) VALUES (?, ?, ?, ?, ?)");
         const majors = this.db.prepare("SELECT * FROM major_categories WHERE category_set_id = ? ORDER BY sort_order, id").all(source.id);
         for (const major of majors) {
           const majorId = Number(insertMajor.run(setId, major.name, major.sort_order, major.is_active).lastInsertRowid);
           const middles = this.db.prepare("SELECT * FROM middle_categories WHERE major_category_id = ? ORDER BY sort_order, id").all(major.id);
           for (const middle of middles) {
             const middleId = Number(insertMiddle.run(majorId, middle.name, middle.sort_order, middle.is_active).lastInsertRowid);
-            const items = this.db.prepare("SELECT item_code, item_name FROM item_mappings WHERE middle_category_id = ? ORDER BY item_code").all(middle.id);
-            for (const item of items) insertItem.run(setId, middleId, item.item_code, item.item_name);
+            const minorIds = new Map();
+            const minors = this.db.prepare("SELECT * FROM minor_categories WHERE middle_category_id = ? ORDER BY sort_order, id").all(middle.id);
+            for (const minor of minors) {
+              minorIds.set(minor.id, Number(insertMinor.run(middleId, minor.name, minor.sort_order, minor.is_active).lastInsertRowid));
+            }
+            const items = this.db.prepare("SELECT minor_category_id, item_code, item_name FROM item_mappings WHERE middle_category_id = ? ORDER BY item_code").all(middle.id);
+            for (const item of items) {
+              insertItem.run(setId, middleId, item.minor_category_id ? minorIds.get(item.minor_category_id) : null, item.item_code, item.item_name);
+            }
           }
         }
       }
@@ -920,23 +967,40 @@ export class AppDatabase {
       FROM middle_categories mc JOIN major_categories jc ON jc.id = mc.major_category_id
       WHERE jc.category_set_id = ? AND mc.is_active = 1 ORDER BY mc.sort_order, mc.id
     `).all(setId);
-    const items = this.db.prepare("SELECT id, middle_category_id AS middleCategoryId, item_code AS itemCode, item_name AS itemName FROM item_mappings WHERE category_set_id = ? ORDER BY item_code").all(setId);
+    const minors = this.db.prepare(`
+      SELECT mn.id, mn.middle_category_id AS middleCategoryId, mn.name, mn.sort_order AS sortOrder
+      FROM minor_categories mn
+      JOIN middle_categories mc ON mc.id = mn.middle_category_id
+      JOIN major_categories jc ON jc.id = mc.major_category_id
+      WHERE jc.category_set_id = ? AND mn.is_active = 1 ORDER BY mn.sort_order, mn.id
+    `).all(setId);
+    const items = this.db.prepare(`
+      SELECT id, middle_category_id AS middleCategoryId, minor_category_id AS minorCategoryId, item_code AS itemCode, item_name AS itemName
+      FROM item_mappings WHERE category_set_id = ? ORDER BY item_code
+    `).all(setId);
 
-    const middlesByMajor = new Map();
-    for (const middle of middles) {
-      if (!middlesByMajor.has(middle.majorCategoryId)) middlesByMajor.set(middle.majorCategoryId, []);
-      middlesByMajor.get(middle.majorCategoryId).push(middle);
-    }
-    const itemsByMiddle = new Map();
-    for (const item of items) {
-      if (!itemsByMiddle.has(item.middleCategoryId)) itemsByMiddle.set(item.middleCategoryId, []);
-      itemsByMiddle.get(item.middleCategoryId).push(item);
-    }
+    const groupBy = (rows, key) => {
+      const map = new Map();
+      for (const row of rows) {
+        if (!map.has(row[key])) map.set(row[key], []);
+        map.get(row[key]).push(row);
+      }
+      return map;
+    };
+    const middlesByMajor = groupBy(middles, "majorCategoryId");
+    const minorsByMiddle = groupBy(minors, "middleCategoryId");
+    // 소분류에 붙은 품번은 소분류 아래에만, 중분류에 바로 붙은 품번은 중분류 아래에만 둡니다.
+    const itemsByMinor = groupBy(items.filter((item) => item.minorCategoryId), "minorCategoryId");
+    const itemsByMiddle = groupBy(items.filter((item) => !item.minorCategoryId), "middleCategoryId");
     return majors.map((major) => ({
       ...major,
       middleCategories: (middlesByMajor.get(major.id) || []).map((middle) => ({
         ...middle,
         items: itemsByMiddle.get(middle.id) || [],
+        minorCategories: (minorsByMiddle.get(middle.id) || []).map((minor) => ({
+          ...minor,
+          items: itemsByMinor.get(minor.id) || [],
+        })),
       })),
     }));
   }
@@ -945,10 +1009,11 @@ export class AppDatabase {
   listMappedItemCodes(categorySetId = null) {
     const setId = categorySetId ? this.assertCategorySet(categorySetId).id : this.getCurrentCategorySetId();
     return this.db.prepare(`
-      SELECT im.item_code AS itemCode, mc.name AS middleName, jc.name AS majorName
+      SELECT im.item_code AS itemCode, mc.name AS middleName, jc.name AS majorName, COALESCE(mn.name, '') AS minorName
       FROM item_mappings im
       JOIN middle_categories mc ON mc.id = im.middle_category_id
       JOIN major_categories jc ON jc.id = mc.major_category_id
+      LEFT JOIN minor_categories mn ON mn.id = im.minor_category_id
       WHERE im.category_set_id = ?
     `).all(setId);
   }
@@ -1005,18 +1070,60 @@ export class AppDatabase {
   }
 
   /**
+   * 중분류 아래에 소분류를 추가합니다.
+   * 소분류가 생기면 품번은 소분류에만 연결하므로, 첫 소분류를 만들 때
+   * 중분류에 바로 연결돼 있던 품번을 새 소분류로 옮깁니다(movedItemCount).
+   */
+  createMinorCategory(data) {
+    const name = normalizeName(data.name, "소분류명", 60);
+    const middleCategoryId = positiveInteger(data.middleCategoryId, "중분류 ID");
+    const setId = this.categorySetIdOfMiddle(middleCategoryId);
+    return this.transaction(() => {
+      const nextOrder = Number(this.db.prepare("SELECT COALESCE(MAX(sort_order), 0) + 1 AS next FROM minor_categories WHERE middle_category_id = ?").get(middleCategoryId).next);
+      const id = Number(this.db.prepare("INSERT INTO minor_categories (middle_category_id, name, sort_order) VALUES (?, ?, ?)")
+        .run(middleCategoryId, name, nextOrder).lastInsertRowid);
+      const moved = this.db.prepare("UPDATE item_mappings SET minor_category_id = ? WHERE middle_category_id = ? AND minor_category_id IS NULL")
+        .run(id, middleCategoryId);
+      this.touchCategorySet(setId);
+      return { id, middleCategoryId, name, sortOrder: nextOrder, movedItemCount: Number(moved.changes) };
+    });
+  }
+
+  updateMinorCategory(id, data) {
+    const name = normalizeName(data.name, "소분류명", 60);
+    const { categorySetId } = this.minorCategoryContext(id);
+    this.db.prepare("UPDATE minor_categories SET name = ? WHERE id = ?").run(name, id);
+    this.touchCategorySet(categorySetId);
+  }
+
+  /** 소분류와 그 소분류에 연결된 품번을 함께 지웁니다. */
+  deleteMinorCategory(id) {
+    const existing = this.db.prepare("SELECT name FROM minor_categories WHERE id = ?").get(id);
+    if (!existing) throw notFound("소분류를 찾을 수 없습니다.");
+    const { categorySetId } = this.minorCategoryContext(id);
+    this.db.prepare("DELETE FROM minor_categories WHERE id = ?").run(id);
+    this.touchCategorySet(categorySetId);
+    return existing.name;
+  }
+
+  /**
    * 분류 순서를 한 칸 위/아래로 옮깁니다.
-   * @param {"major"|"middle"} kind
+   * @param {"major"|"middle"|"minor"} kind
    */
   moveCategory(kind, id, direction) {
     const step = direction === "up" ? -1 : 1;
-    const table = kind === "major" ? "major_categories" : "middle_categories";
+    const table = { major: "major_categories", middle: "middle_categories", minor: "minor_categories" }[kind];
+    if (!table) throw badRequest("올바르지 않은 분류 종류입니다.");
     return this.transaction(() => {
       const current = this.db.prepare(`SELECT * FROM ${table} WHERE id = ?`).get(id);
-      if (!current) throw notFound(kind === "major" ? "대분류를 찾을 수 없습니다." : "중분류를 찾을 수 없습니다.");
-      const siblings = kind === "major"
-        ? this.db.prepare("SELECT id, sort_order FROM major_categories WHERE is_active = 1 AND category_set_id = ? ORDER BY sort_order, id").all(current.category_set_id)
-        : this.db.prepare("SELECT id, sort_order FROM middle_categories WHERE is_active = 1 AND major_category_id = ? ORDER BY sort_order, id").all(current.major_category_id);
+      if (!current) {
+        throw notFound({ major: "대분류를 찾을 수 없습니다.", middle: "중분류를 찾을 수 없습니다.", minor: "소분류를 찾을 수 없습니다." }[kind]);
+      }
+      const siblings = {
+        major: () => this.db.prepare("SELECT id, sort_order FROM major_categories WHERE is_active = 1 AND category_set_id = ? ORDER BY sort_order, id").all(current.category_set_id),
+        middle: () => this.db.prepare("SELECT id, sort_order FROM middle_categories WHERE is_active = 1 AND major_category_id = ? ORDER BY sort_order, id").all(current.major_category_id),
+        minor: () => this.db.prepare("SELECT id, sort_order FROM minor_categories WHERE is_active = 1 AND middle_category_id = ? ORDER BY sort_order, id").all(current.middle_category_id),
+      }[kind]();
 
       const index = siblings.findIndex((row) => row.id === current.id);
       const targetIndex = index + step;
@@ -1028,15 +1135,26 @@ export class AppDatabase {
     });
   }
 
+  /** 품번을 소분류(minorCategoryId) 또는 소분류가 없는 중분류(middleCategoryId)에 연결합니다. */
   createItemMapping(data) {
-    const middleCategoryId = positiveInteger(data.middleCategoryId, "중분류 ID");
     const itemCode = normalizeName(data.itemCode, "품번", 60);
     const itemName = normalizeName(data.itemName, "품명", 120);
-    const setId = this.categorySetIdOfMiddle(middleCategoryId);
-    const result = this.db.prepare("INSERT INTO item_mappings (category_set_id, middle_category_id, item_code, item_name) VALUES (?, ?, ?, ?)")
-      .run(setId, middleCategoryId, itemCode, itemName);
+    let middleCategoryId;
+    let minorCategoryId = null;
+    let setId;
+    if (data.minorCategoryId) {
+      minorCategoryId = positiveInteger(data.minorCategoryId, "소분류 ID");
+      ({ middleCategoryId, categorySetId: setId } = this.minorCategoryContext(minorCategoryId));
+    } else {
+      middleCategoryId = positiveInteger(data.middleCategoryId, "중분류 ID");
+      setId = this.categorySetIdOfMiddle(middleCategoryId);
+      const minorCount = Number(this.db.prepare("SELECT COUNT(*) AS count FROM minor_categories WHERE middle_category_id = ?").get(middleCategoryId).count);
+      if (minorCount > 0) throw badRequest("소분류가 있는 중분류는 소분류를 골라 품번을 연결해 주세요.");
+    }
+    const result = this.db.prepare("INSERT INTO item_mappings (category_set_id, middle_category_id, minor_category_id, item_code, item_name) VALUES (?, ?, ?, ?, ?)")
+      .run(setId, middleCategoryId, minorCategoryId, itemCode, itemName);
     this.touchCategorySet(setId);
-    return { id: Number(result.lastInsertRowid), middleCategoryId, itemCode, itemName };
+    return { id: Number(result.lastInsertRowid), middleCategoryId, minorCategoryId, itemCode, itemName };
   }
 
   deleteItemMapping(id) {
@@ -1179,18 +1297,29 @@ export class AppDatabase {
   captureCurrentCategories(snapshotId, categorySetId = null) {
     const categories = this.listCategories(categorySetId);
     const insertLine = this.db.prepare(`
-      INSERT INTO snapshot_lines (snapshot_id, major_name, middle_name, major_sort, middle_sort)
-      VALUES (?, ?, ?, ?, ?)
+      INSERT INTO snapshot_lines (snapshot_id, major_name, middle_name, minor_name, major_sort, middle_sort, minor_sort)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
     `);
     const insertItem = this.db.prepare("INSERT INTO snapshot_items (snapshot_line_id, snapshot_id, item_code, item_name) VALUES (?, ?, ?, ?)");
     const seenItemCodes = new Set();
+    const insertItems = (lineId, items) => {
+      for (const item of items) {
+        if (seenItemCodes.has(item.itemCode)) continue;
+        seenItemCodes.add(item.itemCode);
+        insertItem.run(lineId, snapshotId, item.itemCode, item.itemName);
+      }
+    };
     for (const major of categories) {
       for (const middle of major.middleCategories) {
-        const lineId = Number(insertLine.run(snapshotId, major.name, middle.name, major.sortOrder, middle.sortOrder).lastInsertRowid);
-        for (const item of middle.items) {
-          if (seenItemCodes.has(item.itemCode)) continue;
-          seenItemCodes.add(item.itemCode);
-          insertItem.run(lineId, snapshotId, item.itemCode, item.itemName);
+        // 소분류가 있으면 소분류마다 한 줄, 없으면 중분류 한 줄이 집행서 라인이 됩니다.
+        if (middle.minorCategories.length === 0) {
+          const lineId = Number(insertLine.run(snapshotId, major.name, middle.name, "", major.sortOrder, middle.sortOrder, 0).lastInsertRowid);
+          insertItems(lineId, middle.items);
+          continue;
+        }
+        for (const minor of middle.minorCategories) {
+          const lineId = Number(insertLine.run(snapshotId, major.name, middle.name, minor.name, major.sortOrder, middle.sortOrder, minor.sortOrder).lastInsertRowid);
+          insertItems(lineId, minor.items);
         }
       }
     }
@@ -1204,16 +1333,17 @@ export class AppDatabase {
       WHERE source.id = ?
     `).get(snapshotId, sourceSnapshotId);
     if (!source) throw notFound("복제할 버전을 찾을 수 없습니다.");
-    const sourceLines = this.db.prepare("SELECT * FROM snapshot_lines WHERE snapshot_id = ? ORDER BY major_sort, middle_sort, id").all(sourceSnapshotId);
+    const sourceLines = this.db.prepare("SELECT * FROM snapshot_lines WHERE snapshot_id = ? ORDER BY major_sort, middle_sort, minor_sort, id").all(sourceSnapshotId);
     const insertLine = this.db.prepare(`
-      INSERT INTO snapshot_lines (snapshot_id, major_name, middle_name, major_sort, middle_sort, execution_budget, remark)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO snapshot_lines (snapshot_id, major_name, middle_name, minor_name, major_sort, middle_sort, minor_sort, execution_budget, remark)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     const sourceItems = this.db.prepare("SELECT item_code, item_name FROM snapshot_items WHERE snapshot_line_id = ? ORDER BY id");
     const insertItem = this.db.prepare("INSERT INTO snapshot_items (snapshot_line_id, snapshot_id, item_code, item_name) VALUES (?, ?, ?, ?)");
     const seenItemCodes = new Set();
     for (const line of sourceLines) {
-      const lineId = Number(insertLine.run(snapshotId, line.major_name, line.middle_name, line.major_sort, line.middle_sort, line.execution_budget, line.remark).lastInsertRowid);
+      const lineId = Number(insertLine.run(snapshotId, line.major_name, line.middle_name, line.minor_name, line.major_sort, line.middle_sort,
+        line.minor_sort, line.execution_budget, line.remark).lastInsertRowid);
       for (const item of sourceItems.all(line.id)) {
         if (seenItemCodes.has(item.item_code)) continue;
         seenItemCodes.add(item.item_code);
@@ -1236,9 +1366,9 @@ export class AppDatabase {
     if (!snapshot) throw notFound("집행서 버전을 찾을 수 없습니다.");
 
     const lines = this.db.prepare(`
-      SELECT id, major_name AS majorName, middle_name AS middleName,
+      SELECT id, major_name AS majorName, middle_name AS middleName, minor_name AS minorName,
              execution_budget AS executionBudget, remark
-      FROM snapshot_lines WHERE snapshot_id = ? ORDER BY major_sort, middle_sort, id
+      FROM snapshot_lines WHERE snapshot_id = ? ORDER BY major_sort, middle_sort, minor_sort, id
     `).all(id);
     const items = this.db.prepare(`
       SELECT snapshot_line_id AS snapshotLineId, item_code AS itemCode, item_name AS itemName

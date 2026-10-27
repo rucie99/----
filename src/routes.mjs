@@ -326,6 +326,53 @@ export function createRoutes() {
     },
     {
       method: "POST",
+      pattern: /^\/api\/minor-categories$/,
+      role: USER_ROLE.ADMIN,
+      async handle(context) {
+        const created = context.database.createMinorCategory(await readJson(context.request));
+        context.audit(AUDIT_ACTION.CATEGORY_CHANGED, "MINOR", created.id,
+          `소분류 추가: ${created.name}${created.movedItemCount ? ` (중분류 품번 ${created.movedItemCount}건 이동)` : ""}`);
+        sendJson(context.response, 201, created);
+      },
+    },
+    {
+      method: "PUT",
+      pattern: /^\/api\/minor-categories\/(\d+)$/,
+      role: USER_ROLE.ADMIN,
+      async handle(context, [rawId]) {
+        const id = positiveInteger(rawId, "소분류 ID");
+        const body = await readJson(context.request);
+        context.database.updateMinorCategory(id, body);
+        context.audit(AUDIT_ACTION.CATEGORY_CHANGED, "MINOR", id, `소분류 수정: ${body.name}`);
+        sendNoContent(context.response);
+      },
+    },
+    {
+      method: "DELETE",
+      pattern: /^\/api\/minor-categories\/(\d+)$/,
+      role: USER_ROLE.ADMIN,
+      async handle(context, [rawId]) {
+        const id = positiveInteger(rawId, "소분류 ID");
+        const name = context.database.deleteMinorCategory(id);
+        context.audit(AUDIT_ACTION.CATEGORY_CHANGED, "MINOR", id, `소분류 삭제: ${name}`);
+        sendNoContent(context.response);
+      },
+    },
+    {
+      method: "POST",
+      pattern: /^\/api\/minor-categories\/(\d+)\/move$/,
+      role: USER_ROLE.ADMIN,
+      async handle(context, [rawId]) {
+        const id = positiveInteger(rawId, "소분류 ID");
+        const body = await readJson(context.request);
+        const direction = body.direction === "up" ? "up" : "down";
+        const moved = context.database.moveCategory("minor", id, direction);
+        if (moved) context.audit(AUDIT_ACTION.CATEGORY_CHANGED, "MINOR", id, `소분류 순서 이동: ${direction}`);
+        sendJson(context.response, 200, { moved, categories: context.database.listCategories() });
+      },
+    },
+    {
+      method: "POST",
       pattern: /^\/api\/item-mappings$/,
       role: USER_ROLE.ADMIN,
       async handle(context) {
@@ -362,7 +409,8 @@ export function createRoutes() {
           items: items.slice(0, MAX_ITEM_SEARCH_RESULTS).map((item) => ({
             ...item,
             mappedTo: mapped.has(item.itemCode)
-              ? `${mapped.get(item.itemCode).majorName} 〉 ${mapped.get(item.itemCode).middleName}`
+              ? [mapped.get(item.itemCode).majorName, mapped.get(item.itemCode).middleName, mapped.get(item.itemCode).minorName]
+                .filter(Boolean).join(" 〉 ")
               : null,
           })),
         });

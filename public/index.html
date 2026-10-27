@@ -186,11 +186,12 @@
               </div>
               <div class="table-wrap">
                 <table class="data-table statement-table">
-                  <caption class="visually-hidden">대분류 · 중분류별 실행예산과 매입금액 집행 현황</caption>
+                  <caption class="visually-hidden">대분류 · 중분류 · 소분류별 실행예산과 매입금액 집행 현황</caption>
                   <thead>
                     <tr>
                       <th scope="col">대분류</th>
                       <th scope="col">중분류</th>
+                      <th scope="col">소분류</th>
                       <th scope="col">연결 품번</th>
                       <th scope="col" class="number-cell">실행예산</th>
                       <th scope="col" class="number-cell">매입금액 소계</th>
@@ -281,9 +282,16 @@
               </div>
               <div id="middleList" class="master-list"></div>
             </section>
+            <section class="panel settings-panel">
+              <div class="panel-heading">
+                <div><span class="step-number">3</span><h2>소분류 <small class="panel-optional">선택</small></h2></div>
+                <button class="icon-button" id="addMinorButton" aria-label="소분류 추가">＋</button>
+              </div>
+              <div id="minorList" class="master-list"></div>
+            </section>
             <section class="panel settings-panel item-panel">
               <div class="panel-heading">
-                <div><span class="step-number">3</span><h2>품번 연결</h2></div>
+                <div><span class="step-number">4</span><h2>품번 연결</h2></div>
               </div>
               <div class="item-search-row">
                 <label class="visually-hidden" for="itemSearchInput">품번 또는 품명 검색</label>
