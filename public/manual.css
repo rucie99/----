@@ -131,3 +131,10 @@ li { margin: 4px 0; }
   .shot, .legend > li { break-inside: avoid; }
   #faq details { display: block; }
 }
+
+/* 상태 표시 예시(품번 검색 창과 같은 색) */
+.pill-free, .pill-here, .pill-else { display: inline-block; padding: 0 8px; border-radius: 999px; font-size: 12.5px; font-weight: 700; }
+.pill-free { color: #166534; background: #dcfce7; }
+.pill-here { color: #1e40af; background: #dbeafe; }
+.pill-else { color: #92400e; background: #fef3c7; }
+.tip ol { margin: 6px 0 0; }

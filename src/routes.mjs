@@ -1,5 +1,6 @@
 import {
   AUDIT_ACTION,
+  MAX_ITEM_PICKER_RESULTS,
   MAX_ITEM_SEARCH_RESULTS,
   RESET_CONFIRM_PHRASE,
   SNAPSHOT_STATUS,
@@ -8,10 +9,19 @@ import {
 } from "./constants.mjs";
 import { assertRole, hasRole } from "./auth.mjs";
 import { badRequest, conflict, forbidden, notFound } from "./errors.mjs";
-import { normalizeDateRange } from "./amarance-client.mjs";
+import { filterItems, normalizeDateRange, splitDateRange } from "./amarance-client.mjs";
 import { assertPasswordPolicy, generateReadablePassword, hashPassword, verifyPassword } from "./passwords.mjs";
 import { readJson, sendJson, sendNoContent, sendBuffer } from "./http.mjs";
 import { createSnapshotWorkbook } from "./xlsx-export.mjs";
+import { nextProjectSync, syncProjects } from "./project-sync.mjs";
+
+/** 프로젝트 화면에 보여 줄 자동 동기화 설정 · 마지막 결과 · 다음 예정 시각. */
+function projectSyncState(database) {
+  const schedule = database.getProjectSyncSchedule();
+  const status = database.getProjectSyncStatus();
+  const next = nextProjectSync(schedule, status);
+  return { schedule, last: status.last, nextAt: next ? next.toISOString() : null };
+}
 import { CONTENT_TYPE } from "./constants.mjs";
 
 function positiveInteger(value, fieldName) {
@@ -382,6 +392,18 @@ export function createRoutes() {
       },
     },
     {
+      method: "POST",
+      pattern: /^\/api\/item-mappings\/bulk$/,
+      role: USER_ROLE.ADMIN,
+      async handle(context) {
+        const body = await readJson(context.request);
+        const result = context.database.createItemMappings(body);
+        context.audit(AUDIT_ACTION.CATEGORY_CHANGED, "ITEM", "",
+          `품번 일괄 연결: 새로 ${result.linked}건 · 옮김 ${result.moved}건 · 건너뜀 ${result.skipped}건`);
+        sendJson(context.response, 200, result);
+      },
+    },
+    {
       method: "DELETE",
       pattern: /^\/api\/item-mappings\/(\d+)$/,
       role: USER_ROLE.ADMIN,
@@ -400,20 +422,27 @@ export function createRoutes() {
       role: USER_ROLE.ADMIN,
       async handle(context) {
         const body = await readJson(context.request);
-        const items = await context.amarance.searchItems(String(body.query ?? "").slice(0, 100), { refresh: Boolean(body.refresh) });
-        const mapped = new Map(context.database
-          .listMappedItemCodes(body.categorySetId ? Number(body.categorySetId) : null)
-          .map((row) => [row.itemCode, row]));
+        const query = String(body.query ?? "").slice(0, 100);
+        const categorySetId = body.categorySetId ? Number(body.categorySetId) : null;
+        const prefix = body.mode === "prefix";
+        // 'received' 는 집행서로 불러왔지만 아직 어느 분류에도 연결되지 않은 품번만 보여 줍니다.
+        const items = body.scope === "received"
+          ? filterItems(context.database.listReceivedUnmappedItems(categorySetId), query, { prefix })
+          : await context.amarance.searchItems(query, { refresh: Boolean(body.refresh), prefix });
+        const mapped = new Map(context.database.listMappedItemCodes(categorySetId).map((row) => [row.itemCode, row]));
+        const limit = Math.min(Math.max(Number(body.limit) || MAX_ITEM_SEARCH_RESULTS, 1), MAX_ITEM_PICKER_RESULTS);
         sendJson(context.response, 200, {
           total: items.length,
-          truncated: items.length > MAX_ITEM_SEARCH_RESULTS,
-          items: items.slice(0, MAX_ITEM_SEARCH_RESULTS).map((item) => ({
-            ...item,
-            mappedTo: mapped.has(item.itemCode)
-              ? [mapped.get(item.itemCode).majorName, mapped.get(item.itemCode).middleName, mapped.get(item.itemCode).minorName]
-                .filter(Boolean).join(" 〉 ")
-              : null,
-          })),
+          truncated: items.length > limit,
+          items: items.slice(0, limit).map((item) => {
+            const row = mapped.get(item.itemCode);
+            return {
+              ...item,
+              mappedTo: row ? [row.majorName, row.middleName, row.minorName].filter(Boolean).join(" 〉 ") : null,
+              mappedMiddleId: row?.middleCategoryId ?? null,
+              mappedMinorId: row?.minorCategoryId ?? null,
+            };
+          }),
         });
       },
     },
@@ -483,21 +512,52 @@ export function createRoutes() {
       pattern: /^\/api\/projects\/sync$/,
       role: USER_ROLE.EDITOR,
       async handle(context) {
-        const fetched = await context.amarance.searchProjects();
-        const { projects, summary } = context.database.upsertProjects(fetched, { reconcile: true });
-        context.audit(AUDIT_ACTION.PROJECT_SYNCED, "PROJECT", "",
-          `수신 ${summary.received} · 추가 ${summary.created} · 갱신 ${summary.updated} · 보관 ${summary.archived} · 삭제 ${summary.removed}`);
-        if (summary.received === 0) {
-          context.logger.warn("아마란스10 프로젝트 조회 결과가 0건입니다.", {
-            mode: context.amarance.getConfiguration().mode,
-            companyCode: context.amarance.getConfiguration().companyCode,
-          });
-        }
-        sendJson(context.response, 200, { projects, summary });
+        const { projects, summary } = await syncProjects({
+          database: context.database,
+          amarance: context.amarance,
+          logger: context.logger,
+          trigger: "manual",
+          actor: context.user,
+          ip: context.ip,
+        });
+        sendJson(context.response, 200, { projects, summary, sync: projectSyncState(context.database) });
+      },
+    },
+    {
+      method: "GET",
+      pattern: /^\/api\/projects$/,
+      role: USER_ROLE.VIEWER,
+      async handle(context) {
+        sendJson(context.response, 200, {
+          projects: context.database.listProjectsWithStats(),
+          sync: projectSyncState(context.database),
+        });
+      },
+    },
+    {
+      method: "PUT",
+      pattern: /^\/api\/project-sync\/schedule$/,
+      role: USER_ROLE.ADMIN,
+      async handle(context) {
+        const body = await readJson(context.request);
+        const schedule = context.database.saveProjectSyncSchedule(body);
+        context.audit(AUDIT_ACTION.SECURITY_SETTINGS_SAVED, "PROJECT_SYNC", "",
+          schedule.enabled
+            ? `프로젝트 자동 동기화: ${schedule.mode === "interval" ? `${schedule.intervalHours}시간마다` : `매일 ${schedule.time}`}`
+            : "프로젝트 자동 동기화 끔");
+        sendJson(context.response, 200, projectSyncState(context.database));
       },
     },
 
     // ------------------------------------------------------------ 스냅샷
+    {
+      method: "GET",
+      pattern: /^\/api\/snapshots$/,
+      role: USER_ROLE.VIEWER,
+      async handle(context) {
+        sendJson(context.response, 200, context.database.listAllSnapshots());
+      },
+    },
     {
       method: "GET",
       pattern: /^\/api\/projects\/(\d+)\/snapshots$/,
@@ -650,9 +710,63 @@ export function createRoutes() {
           fromDate: range.from,
           toDate: range.to,
         });
-        const result = context.database.importReceipts(snapshotId, receipts, { replace: Boolean(body.replace) });
+        const result = context.database.importReceipts(snapshotId, receipts, {
+          replace: Boolean(body.replace),
+          range: { from: range.from, to: range.to },
+        });
         context.audit(AUDIT_ACTION.RECEIPTS_IMPORTED, "SNAPSHOT", snapshotId,
-          `${range.from}~${range.to} 반영 ${result.importedCount}건 / 제외 ${result.skippedCount}건${body.replace ? " (기존 삭제 후 재조회)" : ""}`);
+          `${range.from}~${range.to} 반영 ${result.importedCount}건 / 미분류 ${result.unmappedCount}건${body.replace ? " (기존 삭제 후 재조회)" : ""}`);
+        sendJson(context.response, 200, result);
+      },
+    },
+    {
+      method: "POST",
+      pattern: /^\/api\/snapshots\/(\d+)\/receipts\/refresh$/,
+      role: USER_ROLE.EDITOR,
+      async handle(context, [rawId]) {
+        const snapshotId = positiveInteger(rawId, "버전 ID");
+        const snapshot = context.database.getSnapshot(snapshotId);
+        if (snapshot.status !== SNAPSHOT_STATUS.DRAFT) {
+          throw conflict("확정된 버전은 확정 당시 자료로 고정되어 새로 고칠 수 없습니다.");
+        }
+        const range = context.database.getReceiptRange(snapshotId);
+        if (!range) {
+          throw badRequest("아직 이 버전에 입고를 불러온 적이 없습니다. 먼저 기간을 정해 매입금액을 불러와 주세요.");
+        }
+        // 지금까지 불러온 전체 기간을 다시 조회해 아마란스10과 맞춥니다.
+        // 기간이 조회 한도보다 길면 나눠서 조회합니다(여러 번 나눠 불러온 버전).
+        const { receiptMaxRangeDays } = context.database.getSecuritySettings();
+        const receipts = [];
+        for (const chunk of splitDateRange(range.from, range.to, receiptMaxRangeDays)) {
+          receipts.push(...await context.amarance.fetchReceipts({ projectCode: snapshot.projectCode, fromDate: chunk.from, toDate: chunk.to }));
+        }
+        const result = context.database.importReceipts(snapshotId, receipts, {
+          replace: true,
+          keepExclusions: true,
+          range: { from: range.from, to: range.to },
+        });
+        context.audit(AUDIT_ACTION.RECEIPTS_IMPORTED, "SNAPSHOT", snapshotId,
+          `새로 고침 ${range.from}~${range.to}: 새 입고 ${result.addedCount} · 금액 바뀜 ${result.changedCount} · 정리 ${result.removedCount}`);
+        sendJson(context.response, 200, result);
+      },
+    },
+    {
+      method: "POST",
+      pattern: /^\/api\/snapshots\/(\d+)\/items$/,
+      role: USER_ROLE.EDITOR,
+      async handle(context, [rawId]) {
+        const snapshotId = positiveInteger(rawId, "버전 ID");
+        const body = await readJson(context.request);
+        // 분류 설정을 바꾸는 일은 관리자만 할 수 있으므로, 작성자는 이 버전에만 연결합니다.
+        const alsoSettings = Boolean(body.alsoSettings) && context.user.role === USER_ROLE.ADMIN;
+        const result = context.database.linkSnapshotItem(snapshotId, {
+          lineId: body.lineId,
+          itemCode: body.itemCode,
+          itemName: body.itemName,
+          alsoSettings,
+        });
+        context.audit(AUDIT_ACTION.SNAPSHOT_UPDATED, "SNAPSHOT", snapshotId,
+          `미분류 품번 연결: ${body.itemCode} → 줄 ${body.lineId}${result.settings === "linked" ? " (분류 설정에도 연결)" : ""}`);
         sendJson(context.response, 200, result);
       },
     },

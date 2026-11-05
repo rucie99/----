@@ -162,7 +162,17 @@ export const MAX_REQUEST_BYTES = 1_048_576;
 export const MAX_RECEIPT_HEADERS = 2_000;
 /** 품번 검색 결과 표시 상한. */
 export const MAX_ITEM_SEARCH_RESULTS = 200;
+/** 품번 검색 창에서 한 번에 보여 주고 고를 수 있는 최대 건수(접두어로 모아 일괄 연결할 때). */
+export const MAX_ITEM_PICKER_RESULTS = 2_000;
 export const DEFAULT_RECEIPT_MAX_RANGE_DAYS = 366;
+
+/** 프로젝트 자동 동기화 설정 · 상태를 app_settings 에 저장할 때 쓰는 키. */
+export const PROJECT_SYNC_SETTING_KEY = Object.freeze({
+  SCHEDULE: "PROJECT_SYNC_SCHEDULE",
+  LAST: "PROJECT_SYNC_LAST",
+  LAST_OK_AT: "PROJECT_SYNC_LAST_OK_AT",
+  LAST_AUTO_ATTEMPT: "PROJECT_SYNC_LAST_AUTO_ATTEMPT",
+});
 export const DEFAULT_SESSION_IDLE_MINUTES = 480;
 export const DEFAULT_SESSION_ABSOLUTE_HOURS = 12;
 export const DEFAULT_SSO_TOLERANCE_SECONDS = 300;

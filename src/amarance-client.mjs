@@ -37,8 +37,17 @@ function normalizeSearchText(value) {
  * 품목 목록에서 검색어에 맞는 것을 골라 가까운 순으로 정렬합니다.
  * 띄어쓴 단어는 모두 들어 있어야 하고(AND), 각 단어는 품번 · 품명 · 규격 어디에 있어도 됩니다.
  * 순서: 품번 일치 → 품번으로 시작 → 품번에 포함 → 품명 · 규격에 포함.
+ *
+ * prefix 를 켜면 '품번이 검색어로 시작하는' 품목만 고릅니다(대소문자만 무시, 하이픈은 그대로 비교).
+ * "ET-" 처럼 품번 체계의 앞자리로 한 번에 모아 연결할 때 씁니다.
  */
-export function filterItems(items, query = "") {
+export function filterItems(items, query = "", { prefix = false } = {}) {
+  if (prefix) {
+    const head = String(query).trim().toLowerCase();
+    return items
+      .filter((item) => String(item.itemCode).toLowerCase().startsWith(head))
+      .sort((a, b) => String(a.itemCode).localeCompare(String(b.itemCode)));
+  }
   const terms = String(query).trim().split(/\s+/).map(normalizeSearchText).filter(Boolean);
   const whole = normalizeSearchText(query);
   const rank = (item) => {
@@ -109,6 +118,24 @@ function parseIsoDate(value, fieldName) {
 }
 
 /** 입고 조회 기간을 검증하고 정규화합니다. */
+/**
+ * YYYYMMDD 기간을 maxDays 일 이하의 구간으로 나눕니다(양 끝 포함).
+ * 새로 고침할 기간이 한 번에 조회할 수 있는 한도보다 길 때 씁니다.
+ */
+export function splitDateRange(from, to, maxDays) {
+  const start = parseIsoDate(from, "입고 시작일");
+  const end = parseIsoDate(to, "입고 종료일");
+  const days = Math.max(1, Math.floor(Number(maxDays) || 1));
+  const format = (date) => date.toISOString().slice(0, 10).replaceAll("-", "");
+  const chunks = [];
+  for (let cursor = start; cursor <= end;) {
+    const chunkEnd = new Date(Math.min(end.getTime(), cursor.getTime() + (days - 1) * 86_400_000));
+    chunks.push({ from: format(cursor), to: format(chunkEnd) });
+    cursor = new Date(chunkEnd.getTime() + 86_400_000);
+  }
+  return chunks;
+}
+
 export function normalizeDateRange({ fromDate, toDate, maxRangeDays }) {
   const from = parseIsoDate(fromDate, "입고 시작일");
   const to = parseIsoDate(toDate, "입고 종료일");
@@ -218,9 +245,9 @@ export class AmaranceClient {
    * 그래서 조건 없이 전체 품목을 받아 두고(ITEM_CACHE_TTL_MS 동안 재사용) 여기서 부분 일치로 거릅니다.
    * 전체 조회가 실패하면 품번 · 품명 정확히 일치 조회로 대신합니다.
    */
-  async searchItems(query = "", { refresh = false } = {}) {
+  async searchItems(query = "", { refresh = false, prefix = false } = {}) {
     try {
-      return filterItems(await this.listItems({ refresh }), query);
+      return filterItems(await this.listItems({ refresh }), query, { prefix });
     } catch (error) {
       const exact = String(query).trim();
       if (this.mode === AMARANCE_MODE.DEMO || !exact) throw error;

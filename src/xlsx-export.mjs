@@ -284,7 +284,8 @@ function buildWorksheet(snapshot, generatedAt) {
   const confirmedNote = snapshot.confirmedBy
     ? ` · 확정 ${snapshot.confirmedBy} (${formatDateTime(snapshot.confirmedAt)})`
     : "";
-  sheetRows.push(row(noteRow, [value(`기준: 저장된 스냅샷 v${snapshot.versionNo} · 생성 ${formatDateTime(generatedAt)} · 연결 품번은 건수만 표기${confirmedNote}`, CELL_STYLE.NOTE)], { height: 20 }));
+  const receiptNote = snapshot.receiptSource?.fetchedAt ? ` · 입고 기준 ${formatDateTime(snapshot.receiptSource.fetchedAt)}` : "";
+  sheetRows.push(row(noteRow, [value(`기준: 저장된 스냅샷 v${snapshot.versionNo} · 생성 ${formatDateTime(generatedAt)}${receiptNote} · 연결 품번은 건수만 표기${confirmedNote}`, CELL_STYLE.NOTE)], { height: 20 }));
   sheetRows.push(row(signLabelRow, [
     value("본 보고서는 아마란스10 입고 공급가액을 기준으로 작성되었습니다.", CELL_STYLE.NOTE),
     value("", CELL_STYLE.NOTE), value("", CELL_STYLE.NOTE), value("", CELL_STYLE.NOTE), value("", CELL_STYLE.NOTE),

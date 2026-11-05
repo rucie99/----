@@ -3,6 +3,7 @@ import { createServer } from "node:http";
 import { extname, join, normalize, resolve, sep } from "node:path";
 
 import { AmaranceClient } from "./amarance-client.mjs";
+import { createProjectSyncScheduler } from "./project-sync.mjs";
 import { AppDatabase } from "./database.mjs";
 import { AuthService, assertRole } from "./auth.mjs";
 import { createRoutes } from "./routes.mjs";
@@ -96,6 +97,9 @@ export function createApp({
     { logger },
   );
   const auth = new AuthService({ database, logger });
+  // 관리자가 정한 시각에 아마란스10 프로젝트를 자동으로 동기화합니다(꺼 두면 아무 일도 하지 않음).
+  const projectSyncScheduler = createProjectSyncScheduler({ database, amarance, logger });
+  projectSyncScheduler.start();
   const routes = createRoutes();
 
   function allowedOrigins(request) {
@@ -401,6 +405,7 @@ export function createApp({
 
   function close() {
     clearInterval(purgeTimer);
+    projectSyncScheduler.stop();
     return new Promise((resolveClose) => {
       server.close(() => {
         clearTimeout(forceTimer);

@@ -60,8 +60,11 @@ test("스냅샷 품번과 일치하는 입고금액만 집계한다", () => {
     { sourceKey: "B", receiptNo: "RV-B", itemCode: "NOT-MAPPED", itemName: "미연결", receiptDate: "20260806", amount: 9_000_000, vatAmount: 900_000 },
   ]);
 
-  assert.equal(result.importedCount, 1);
+  // 미연결 품번 입고도 '미분류'로 보관하되, 매입금액에는 넣지 않습니다.
+  assert.equal(result.importedCount, 2);
+  assert.equal(result.unmappedCount, 1);
   assert.equal(result.snapshot.totals.purchaseAmount, 2_000_000);
+  assert.deepEqual(result.snapshot.unmapped, { count: 1, amount: 9_000_000, itemCount: 1 });
   assert.equal(result.snapshot.totals.profitAmount, 8_000_000);
   database.close();
 });
@@ -156,17 +159,30 @@ test("입고 내역을 지우거나 다시 조회로 교체할 수 있다", () =
   database.close();
 });
 
-test("제외된 입고 건수와 품번을 함께 알려준다", () => {
+test("분류에 없는 품번의 입고는 미분류로 보관하고, 이 버전의 줄에 연결하면 집계된다", () => {
   const database = new AppDatabase(":memory:");
-  database.upsertProjects([{ code: "TEST-SKIP", name: "제외 안내", contractAmount: 1_000_000, status: PROJECT_STATUS.ACTIVE }]);
+  database.upsertProjects([{ code: "TEST-SKIP", name: "미분류 안내", contractAmount: 1_000_000, status: PROJECT_STATUS.ACTIVE }]);
   const snapshot = database.createSnapshot(database.listProjects()[0].id);
   const result = database.importReceipts(snapshot.id, [
     { sourceKey: "X", receiptNo: "X", itemCode: "UNKNOWN-1", itemName: "미연결", receiptDate: "20260501", amount: 100, vatAmount: 0 },
     { sourceKey: "Y", receiptNo: "Y", itemCode: "UNKNOWN-2", itemName: "미연결", receiptDate: "20260501", amount: 200, vatAmount: 0 },
   ]);
-  assert.equal(result.importedCount, 0);
-  assert.equal(result.skippedCount, 2);
-  assert.deepEqual(result.skippedItemCodes.sort(), ["UNKNOWN-1", "UNKNOWN-2"]);
+  assert.equal(result.importedCount, 2);
+  assert.equal(result.unmappedCount, 2);
+  assert.deepEqual(result.unmappedItemCodes.sort(), ["UNKNOWN-1", "UNKNOWN-2"]);
+  assert.ok(result.snapshot.receipts.every((receipt) => receipt.lineId === null));
+  assert.equal(result.snapshot.totals.purchaseAmount, 0);
+
+  // 새로 고쳐도 사라지지 않고, 줄에 연결하면 그 줄 매입금액에 들어갑니다.
+  const line = database.getSnapshot(snapshot.id).lines.find((item) => item.middleName === "배관자재");
+  const linked = database.linkSnapshotItem(snapshot.id, { lineId: line.id, itemCode: "UNKNOWN-2", itemName: "미연결", alsoSettings: true });
+  assert.equal(linked.settings, "linked");
+  assert.equal(linked.snapshot.lines.find((item) => item.id === line.id).purchaseAmount, line.purchaseAmount + 200);
+  assert.deepEqual(linked.snapshot.unmapped, { count: 1, amount: 100, itemCount: 1 });
+  assert.ok(database.listMappedItemCodes().some((row) => row.itemCode === "UNKNOWN-2" && row.middleName === "배관자재"));
+
+  // 같은 품번을 두 줄에 걸 수는 없습니다.
+  assert.throws(() => database.linkSnapshotItem(snapshot.id, { lineId: line.id, itemCode: "UNKNOWN-2" }), /이미 '배관자재' 줄에 연결된/);
   database.close();
 });
 

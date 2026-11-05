@@ -16,6 +16,7 @@ import {
   DEFAULT_SSO_TOLERANCE_SECONDS,
   ENCRYPTED_SETTING_KEYS,
   PROJECT_STATUS,
+  PROJECT_SYNC_SETTING_KEY,
   SECURITY_SETTING_KEY,
   SNAPSHOT_STATUS,
   SSO_SETTING_KEY,
@@ -174,6 +175,12 @@ export class AppDatabase {
         item_name TEXT NOT NULL,
         UNIQUE(snapshot_line_id, item_code)
       );
+      CREATE TABLE IF NOT EXISTS receipt_exclusions (
+        snapshot_id INTEGER NOT NULL REFERENCES snapshots(id) ON DELETE CASCADE,
+        source_key TEXT NOT NULL,
+        excluded_at TEXT NOT NULL,
+        PRIMARY KEY (snapshot_id, source_key)
+      );
       CREATE TABLE IF NOT EXISTS receipts (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         snapshot_id INTEGER NOT NULL REFERENCES snapshots(id) ON DELETE CASCADE,
@@ -255,6 +262,12 @@ export class AppDatabase {
       this.db.exec("ALTER TABLE snapshots ADD COLUMN created_by TEXT NOT NULL DEFAULT ''");
       this.db.exec("ALTER TABLE snapshots ADD COLUMN confirmed_by TEXT NOT NULL DEFAULT ''");
       this.db.exec("ALTER TABLE snapshots ADD COLUMN confirmed_at TEXT");
+    }
+    if (!snapshotColumns.has("receipts_fetched_at")) {
+      // 입고를 어느 기간으로, 언제 마지막으로 불러왔는지 기록해 '기준 시각' 안내와 새로 고침에 씁니다.
+      this.db.exec("ALTER TABLE snapshots ADD COLUMN receipt_from TEXT");
+      this.db.exec("ALTER TABLE snapshots ADD COLUMN receipt_to TEXT");
+      this.db.exec("ALTER TABLE snapshots ADD COLUMN receipts_fetched_at TEXT");
     }
     if (!snapshotColumns.has("revision")) {
       // 저장 시각(밀리초)만으로는 같은 순간의 두 저장을 구분하지 못하므로
@@ -1009,7 +1022,8 @@ export class AppDatabase {
   listMappedItemCodes(categorySetId = null) {
     const setId = categorySetId ? this.assertCategorySet(categorySetId).id : this.getCurrentCategorySetId();
     return this.db.prepare(`
-      SELECT im.item_code AS itemCode, mc.name AS middleName, jc.name AS majorName, COALESCE(mn.name, '') AS minorName
+      SELECT im.item_code AS itemCode, mc.name AS middleName, jc.name AS majorName, COALESCE(mn.name, '') AS minorName,
+             im.middle_category_id AS middleCategoryId, im.minor_category_id AS minorCategoryId
       FROM item_mappings im
       JOIN middle_categories mc ON mc.id = im.middle_category_id
       JOIN major_categories jc ON jc.id = mc.major_category_id
@@ -1135,26 +1149,88 @@ export class AppDatabase {
     });
   }
 
+  /** 품번을 붙일 자리: 소분류(minorCategoryId) 또는 소분류가 없는 중분류(middleCategoryId). */
+  resolveMappingTarget(data) {
+    if (data.minorCategoryId) {
+      const minorCategoryId = positiveInteger(data.minorCategoryId, "소분류 ID");
+      const { middleCategoryId, categorySetId } = this.minorCategoryContext(minorCategoryId);
+      return { setId: categorySetId, middleCategoryId, minorCategoryId };
+    }
+    const middleCategoryId = positiveInteger(data.middleCategoryId, "중분류 ID");
+    const setId = this.categorySetIdOfMiddle(middleCategoryId);
+    const minorCount = Number(this.db.prepare("SELECT COUNT(*) AS count FROM minor_categories WHERE middle_category_id = ?").get(middleCategoryId).count);
+    if (minorCount > 0) throw badRequest("소분류가 있는 중분류는 소분류를 골라 품번을 연결해 주세요.");
+    return { setId, middleCategoryId, minorCategoryId: null };
+  }
+
   /** 품번을 소분류(minorCategoryId) 또는 소분류가 없는 중분류(middleCategoryId)에 연결합니다. */
   createItemMapping(data) {
     const itemCode = normalizeName(data.itemCode, "품번", 60);
     const itemName = normalizeName(data.itemName, "품명", 120);
-    let middleCategoryId;
-    let minorCategoryId = null;
-    let setId;
-    if (data.minorCategoryId) {
-      minorCategoryId = positiveInteger(data.minorCategoryId, "소분류 ID");
-      ({ middleCategoryId, categorySetId: setId } = this.minorCategoryContext(minorCategoryId));
-    } else {
-      middleCategoryId = positiveInteger(data.middleCategoryId, "중분류 ID");
-      setId = this.categorySetIdOfMiddle(middleCategoryId);
-      const minorCount = Number(this.db.prepare("SELECT COUNT(*) AS count FROM minor_categories WHERE middle_category_id = ?").get(middleCategoryId).count);
-      if (minorCount > 0) throw badRequest("소분류가 있는 중분류는 소분류를 골라 품번을 연결해 주세요.");
-    }
+    const { setId, middleCategoryId, minorCategoryId } = this.resolveMappingTarget(data);
     const result = this.db.prepare("INSERT INTO item_mappings (category_set_id, middle_category_id, minor_category_id, item_code, item_name) VALUES (?, ?, ?, ?, ?)")
       .run(setId, middleCategoryId, minorCategoryId, itemCode, itemName);
     this.touchCategorySet(setId);
     return { id: Number(result.lastInsertRowid), middleCategoryId, minorCategoryId, itemCode, itemName };
+  }
+
+  /**
+   * 여러 품번을 한 번에 연결합니다(검색 창의 '선택한 품번 연결').
+   * 다른 분류에 이미 연결된 품번은 move 일 때만 이 분류로 옮기고, 아니면 건너뜁니다.
+   */
+  createItemMappings(data) {
+    const items = Array.isArray(data.items) ? data.items : [];
+    if (items.length === 0) throw badRequest("연결할 품번을 골라 주세요.");
+    if (items.length > 2_000) throw badRequest("한 번에 연결할 수 있는 품번은 2,000개까지입니다.");
+    const { setId, middleCategoryId, minorCategoryId } = this.resolveMappingTarget(data);
+    const find = this.db.prepare(`
+      SELECT id, middle_category_id AS middleCategoryId, minor_category_id AS minorCategoryId
+      FROM item_mappings WHERE category_set_id = ? AND item_code = ?
+    `);
+    const insert = this.db.prepare("INSERT INTO item_mappings (category_set_id, middle_category_id, minor_category_id, item_code, item_name) VALUES (?, ?, ?, ?, ?)");
+    const move = this.db.prepare("UPDATE item_mappings SET middle_category_id = ?, minor_category_id = ? WHERE id = ?");
+    const result = { linked: 0, moved: 0, unchanged: 0, skipped: 0, skippedCodes: [] };
+
+    this.transaction(() => {
+      for (const item of items) {
+        const itemCode = normalizeName(item.itemCode, "품번", 60);
+        const itemName = String(item.itemName ?? itemCode).trim().slice(0, 120) || itemCode;
+        const existing = find.get(setId, itemCode);
+        if (!existing) {
+          insert.run(setId, middleCategoryId, minorCategoryId, itemCode, itemName);
+          result.linked += 1;
+        } else if (existing.middleCategoryId === middleCategoryId && (existing.minorCategoryId ?? null) === minorCategoryId) {
+          result.unchanged += 1;
+        } else if (data.move) {
+          move.run(middleCategoryId, minorCategoryId, existing.id);
+          result.moved += 1;
+        } else {
+          result.skipped += 1;
+          if (result.skippedCodes.length < 20) result.skippedCodes.push(itemCode);
+        }
+      }
+      if (result.linked || result.moved) this.touchCategorySet(setId);
+    });
+    return result;
+  }
+
+  /**
+   * 집행서로 불러온 입고 중, 이 설정 버전의 어느 분류에도 연결되지 않은 품번.
+   * 같은 입고가 여러 버전에 들어 있어도 한 번만 셉니다.
+   */
+  listReceivedUnmappedItems(categorySetId = null) {
+    const setId = categorySetId ? this.assertCategorySet(categorySetId).id : this.getCurrentCategorySetId();
+    return this.db.prepare(`
+      SELECT item_code AS itemCode, MAX(item_name) AS itemName, '' AS specification,
+             COUNT(*) AS receiptCount, SUM(amount) AS receiptAmount, MAX(receipt_date) AS lastReceiptDate
+      FROM (
+        SELECT item_code, source_key, MAX(item_name) AS item_name, MAX(amount) AS amount, MAX(receipt_date) AS receipt_date
+        FROM receipts GROUP BY item_code, source_key
+      )
+      WHERE item_code NOT IN (SELECT item_code FROM item_mappings WHERE category_set_id = ?)
+      GROUP BY item_code
+      ORDER BY receiptAmount DESC, itemCode
+    `).all(setId);
   }
 
   deleteItemMapping(id) {
@@ -1248,6 +1324,79 @@ export class AppDatabase {
     `).all().map((row) => ({ ...row, isArchived: Boolean(row.isArchived) }));
   }
 
+  /** 프로젝트 목록 화면용: 프로젝트마다 집행서 버전 수와 가장 최근 버전의 상태. */
+  listProjectsWithStats() {
+    return this.db.prepare(`
+      SELECT p.id, p.code, p.name, p.contract_amount AS contractAmount, p.status, p.synced_at AS syncedAt,
+             p.is_archived AS isArchived,
+             (SELECT COUNT(*) FROM snapshots s WHERE s.project_id = p.id) AS snapshotCount,
+             latest.id AS latestSnapshotId, latest.version_no AS latestVersionNo, latest.status AS latestStatus,
+             latest.updated_at AS latestUpdatedAt
+      FROM projects p
+      LEFT JOIN snapshots latest ON latest.id = (
+        SELECT s2.id FROM snapshots s2 WHERE s2.project_id = p.id ORDER BY s2.version_no DESC LIMIT 1
+      )
+      ORDER BY p.is_archived, CASE p.status WHEN '${PROJECT_STATUS.ACTIVE}' THEN 0 ELSE 1 END, p.code DESC
+    `).all().map((row) => ({ ...row, isArchived: Boolean(row.isArchived) }));
+  }
+
+  // ---------------------------------------------------------------- 프로젝트 자동 동기화
+
+  getProjectSyncSchedule() {
+    let saved = {};
+    try {
+      saved = JSON.parse(this.readSetting(PROJECT_SYNC_SETTING_KEY.SCHEDULE, "{}"));
+    } catch {
+      saved = {};
+    }
+    return {
+      enabled: Boolean(saved.enabled),
+      mode: saved.mode === "interval" ? "interval" : "daily",
+      time: /^\d{2}:\d{2}$/.test(saved.time || "") ? saved.time : "06:00",
+      intervalHours: boundedNumber(saved.intervalHours, 6, 1, 24),
+    };
+  }
+
+  saveProjectSyncSchedule(schedule) {
+    const time = String(schedule.time ?? "06:00");
+    if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(time)) throw badRequest("동기화 시각은 00:00 ~ 23:59 형식으로 입력해 주세요.");
+    const normalized = {
+      enabled: Boolean(schedule.enabled),
+      mode: schedule.mode === "interval" ? "interval" : "daily",
+      time,
+      intervalHours: boundedNumber(schedule.intervalHours, 6, 1, 24),
+    };
+    this.writeSettings({ [PROJECT_SYNC_SETTING_KEY.SCHEDULE]: JSON.stringify(normalized) });
+    return normalized;
+  }
+
+  /**
+   * 동기화 결과를 남깁니다. 다음 자동 동기화 시각은 '마지막으로 성공한 동기화(수동 포함)' 기준이고,
+   * 자동 동기화가 실패했으면 그 시도 시각을 기억해 잠시 쉬었다가 다시 시도합니다.
+   */
+  recordProjectSync({ at, trigger, ok, summary = null, error = "" }) {
+    const entries = { [PROJECT_SYNC_SETTING_KEY.LAST]: JSON.stringify({ at, trigger, ok, summary, error }) };
+    if (ok) entries[PROJECT_SYNC_SETTING_KEY.LAST_OK_AT] = at;
+    if (trigger === "auto") entries[PROJECT_SYNC_SETTING_KEY.LAST_AUTO_ATTEMPT] = JSON.stringify({ at, ok });
+    this.writeSettings(entries);
+  }
+
+  getProjectSyncStatus() {
+    let last = null;
+    try {
+      last = JSON.parse(this.readSetting(PROJECT_SYNC_SETTING_KEY.LAST, "null"));
+    } catch {
+      last = null;
+    }
+    let lastAutoAttempt = null;
+    try {
+      lastAutoAttempt = JSON.parse(this.readSetting(PROJECT_SYNC_SETTING_KEY.LAST_AUTO_ATTEMPT, "null"));
+    } catch {
+      lastAutoAttempt = null;
+    }
+    return { last, lastOkAt: this.readSetting(PROJECT_SYNC_SETTING_KEY.LAST_OK_AT, "") || null, lastAutoAttempt };
+  }
+
   // ---------------------------------------------------------------- 스냅샷
 
   listSnapshots(projectId) {
@@ -1258,6 +1407,37 @@ export class AppDatabase {
              category_set_id AS categorySetId, category_set_label AS categorySetLabel
       FROM snapshots WHERE project_id = ? ORDER BY version_no DESC
     `).all(positiveInteger(projectId, "프로젝트 ID"));
+  }
+
+  /**
+   * 기성집행서 목록 화면용: 모든 프로젝트의 버전과 금액 요약.
+   * 매입금액은 분류에 연결된 품번의 입고만 더합니다(미분류는 따로 셈).
+   */
+  listAllSnapshots() {
+    return this.db.prepare(`
+      SELECT s.id, s.project_id AS projectId, p.code AS projectCode, p.name AS projectName, p.is_archived AS isArchived,
+             s.version_no AS versionNo, s.title, s.status, s.contract_amount AS contractAmount,
+             s.created_at AS createdAt, s.updated_at AS updatedAt, s.created_by AS createdBy,
+             s.confirmed_by AS confirmedBy, s.confirmed_at AS confirmedAt,
+             s.category_set_label AS categorySetLabel, s.receipts_fetched_at AS receiptsFetchedAt,
+             (SELECT MAX(s3.version_no) FROM snapshots s3 WHERE s3.project_id = s.project_id) AS latestVersionNo,
+             (SELECT COALESCE(SUM(sl.execution_budget), 0) FROM snapshot_lines sl WHERE sl.snapshot_id = s.id) AS executionBudget,
+             (SELECT COALESCE(SUM(r.amount), 0) FROM receipts r
+                JOIN snapshot_items si ON si.snapshot_id = r.snapshot_id AND si.item_code = r.item_code
+               WHERE r.snapshot_id = s.id) AS purchaseAmount,
+             (SELECT COUNT(*) FROM receipts r
+               WHERE r.snapshot_id = s.id
+                 AND NOT EXISTS (SELECT 1 FROM snapshot_items si WHERE si.snapshot_id = r.snapshot_id AND si.item_code = r.item_code)
+             ) AS unmappedCount
+      FROM snapshots s JOIN projects p ON p.id = s.project_id
+      ORDER BY s.updated_at DESC, s.id DESC
+    `).all().map((row) => ({
+      ...row,
+      isArchived: Boolean(row.isArchived),
+      isLatest: row.versionNo === row.latestVersionNo,
+      ...calculateSummary(row.contractAmount, row.purchaseAmount),
+      executionRate: row.executionBudget ? Math.round((row.purchaseAmount / row.executionBudget) * 1000) / 10 : 0,
+    }));
   }
 
   createSnapshot(projectId, options = {}) {
@@ -1359,6 +1539,7 @@ export class AppDatabase {
              s.contract_amount AS contractAmount, s.revision, s.created_at AS createdAt, s.updated_at AS updatedAt,
              s.created_by AS createdBy, s.confirmed_by AS confirmedBy, s.confirmed_at AS confirmedAt,
              s.category_set_id AS categorySetId, s.category_set_label AS categorySetLabel,
+             s.receipt_from AS receiptFrom, s.receipt_to AS receiptTo, s.receipts_fetched_at AS receiptsFetchedAt,
              p.code AS projectCode, p.name AS projectName,
              p.contract_amount AS projectContractAmount
       FROM snapshots s JOIN projects p ON p.id = s.project_id WHERE s.id = ?
@@ -1396,8 +1577,15 @@ export class AppDatabase {
     const purchaseAmount = enrichedLines.reduce((sum, line) => sum + line.purchaseAmount, 0);
     const executionBudget = enrichedLines.reduce((sum, line) => sum + line.executionBudget, 0);
     const receipts = this.listReceipts(id);
-    // 스냅샷 품번에 없는 입고는 집계에서 빠지므로, 화면에서 안내할 수 있게 건수를 함께 넘깁니다.
-    const { projectContractAmount, ...rest } = snapshot;
+    // 분류에 연결되지 않은 입고는 집계에서 빠지므로, 화면에서 안내하고 연결할 수 있게 따로 모읍니다.
+    const unmappedReceipts = receipts.filter((receipt) => !receipt.lineId);
+    const unmapped = {
+      count: unmappedReceipts.length,
+      amount: unmappedReceipts.reduce((sum, receipt) => sum + toWon(receipt.amount), 0),
+      itemCount: new Set(unmappedReceipts.map((receipt) => receipt.itemCode)).size,
+    };
+    const { projectContractAmount, receiptFrom, receiptTo, receiptsFetchedAt, ...rest } = snapshot;
+    const excludedCount = Number(this.db.prepare("SELECT COUNT(*) AS count FROM receipt_exclusions WHERE snapshot_id = ?").get(id).count);
     return {
       ...rest,
       contractAmountChanged: toWon(projectContractAmount) !== toWon(snapshot.contractAmount),
@@ -1409,6 +1597,14 @@ export class AppDatabase {
         budgetBalance: executionBudget - purchaseAmount,
       },
       receipts,
+      unmapped,
+      // 입고 기준: 언제, 어느 기간으로 불러왔는지(없으면 아직 불러온 적 없음)
+      receiptSource: {
+        from: receiptFrom || null,
+        to: receiptTo || null,
+        fetchedAt: receiptsFetchedAt || null,
+        excludedCount,
+      },
     };
   }
 
@@ -1521,8 +1717,13 @@ export class AppDatabase {
 
   // ---------------------------------------------------------------- 입고
 
-  importReceipts(snapshotId, receipts, { replace = false } = {}) {
-    const allowedItems = new Set(
+  /**
+   * 입고를 반영합니다. 분류에 연결되지 않은 품번의 입고도 버리지 않고 '미분류'로 보관합니다.
+   * 미분류 입고는 매입금액 집계에서는 빠지고(snapshot_items 와 이어지지 않으므로),
+   * 화면에서 확인한 뒤 이 버전의 줄에 연결하면 그때부터 집계됩니다.
+   */
+  importReceipts(snapshotId, receipts, { replace = false, range = null, keepExclusions = false } = {}) {
+    const mappedItems = new Set(
       this.db.prepare("SELECT item_code AS itemCode FROM snapshot_items WHERE snapshot_id = ?").all(snapshotId).map((row) => row.itemCode),
     );
     const insert = this.db.prepare(`
@@ -1538,18 +1739,40 @@ export class AppDatabase {
         fetched_at = excluded.fetched_at
     `);
     let importedCount = 0;
-    let skippedCount = 0;
-    const skippedItemCodes = new Set();
+    let unmappedCount = 0;
+    let excludedCount = 0;
+    const unmappedItemCodes = new Set();
     const fetchedAt = nowIso();
+    // 기간을 나눠 조회하면 같은 입고가 겹쳐 올 수 있어 원본키로 한 번만 남깁니다.
+    const unique = [...new Map(receipts.filter((receipt) => receipt.itemCode).map((receipt) => [String(receipt.sourceKey), receipt])).values()];
+    const before = new Map(this.db.prepare("SELECT source_key AS sourceKey, amount FROM receipts WHERE snapshot_id = ?")
+      .all(snapshotId).map((row) => [row.sourceKey, Number(row.amount)]));
+    let addedCount = 0;
+    let changedCount = 0;
+    let removedCount = 0;
 
     this.transaction(() => {
       this.assertDraftSnapshot(snapshotId);
-      if (replace) this.db.prepare("DELETE FROM receipts WHERE snapshot_id = ?").run(snapshotId);
-      for (const receipt of receipts) {
-        if (!allowedItems.has(receipt.itemCode)) {
-          skippedCount += 1;
-          if (receipt.itemCode) skippedItemCodes.add(receipt.itemCode);
+      // 사용자가 '기존 내역 지우고 다시 조회'를 고르면 직접 뺀 입고 기록도 함께 비웁니다. 새로 고침은 그대로 둡니다.
+      if (replace && !keepExclusions) this.db.prepare("DELETE FROM receipt_exclusions WHERE snapshot_id = ?").run(snapshotId);
+      const excluded = new Set(this.db.prepare("SELECT source_key AS sourceKey FROM receipt_exclusions WHERE snapshot_id = ?")
+        .all(snapshotId).map((row) => row.sourceKey));
+      if (replace) {
+        const fetchedKeys = new Set(unique.map((receipt) => String(receipt.sourceKey)));
+        removedCount = [...before.keys()].filter((key) => !fetchedKeys.has(key)).length;
+        this.db.prepare("DELETE FROM receipts WHERE snapshot_id = ?").run(snapshotId);
+      }
+      for (const receipt of unique) {
+        if (excluded.has(String(receipt.sourceKey))) {
+          excludedCount += 1;
           continue;
+        }
+        const key = String(receipt.sourceKey);
+        if (!before.has(key)) addedCount += 1;
+        else if (before.get(key) !== toWon(receipt.amount)) changedCount += 1;
+        if (!mappedItems.has(receipt.itemCode)) {
+          unmappedCount += 1;
+          unmappedItemCodes.add(receipt.itemCode);
         }
         insert.run(
           snapshotId,
@@ -1564,21 +1787,118 @@ export class AppDatabase {
         );
         importedCount += 1;
       }
+      this.recordReceiptRange(snapshotId, range, { replace, fetchedAt });
       this.touchSnapshot(snapshotId, fetchedAt);
     });
 
     return {
       importedCount,
-      skippedCount,
-      skippedItemCodes: [...skippedItemCodes].slice(0, 20),
+      addedCount,
+      changedCount,
+      removedCount,
+      excludedCount,
+      unmappedCount,
+      unmappedItemCodes: [...unmappedItemCodes].slice(0, 20),
       snapshot: this.getSnapshot(snapshotId),
     };
+  }
+
+  /**
+   * 이 버전에 입고를 불러온 기간과 시각을 남깁니다.
+   * 추가로 불러오면 기간을 넓히고(가장 이른 시작일 ~ 가장 늦은 종료일), 지우고 다시 불러오면 그 기간으로 바꿉니다.
+   */
+  recordReceiptRange(snapshotId, range, { replace = false, fetchedAt = nowIso() } = {}) {
+    if (!range?.from || !range?.to) {
+      this.db.prepare("UPDATE snapshots SET receipts_fetched_at = ? WHERE id = ?").run(fetchedAt, snapshotId);
+      return;
+    }
+    const current = this.db.prepare("SELECT receipt_from AS rangeFrom, receipt_to AS rangeTo FROM snapshots WHERE id = ?").get(snapshotId);
+    const from = !replace && current?.rangeFrom && current.rangeFrom < range.from ? current.rangeFrom : range.from;
+    const to = !replace && current?.rangeTo && current.rangeTo > range.to ? current.rangeTo : range.to;
+    this.db.prepare("UPDATE snapshots SET receipt_from = ?, receipt_to = ?, receipts_fetched_at = ? WHERE id = ?")
+      .run(from, to, fetchedAt, snapshotId);
+  }
+
+  /** 새로 고침할 기간(이 버전에 지금까지 불러온 전체 기간). 불러온 적이 없으면 null. */
+  getReceiptRange(snapshotId) {
+    const row = this.db.prepare(`
+      SELECT receipt_from AS rangeFrom, receipt_to AS rangeTo, receipts_fetched_at AS fetchedAt FROM snapshots WHERE id = ?
+    `).get(snapshotId);
+    if (!row) throw notFound("집행서 버전을 찾을 수 없습니다.");
+    return row.rangeFrom && row.rangeTo ? { from: row.rangeFrom, to: row.rangeTo, fetchedAt: row.fetchedAt } : null;
+  }
+
+  /**
+   * 미분류 품번을 이 버전의 한 줄에 연결합니다(작성중 버전만).
+   * alsoSettings 이면 이 버전이 나온 설정 버전에도 같은 분류로 연결해, 다음 버전부터 자동으로 들어오게 합니다.
+   * 결과의 settings: linked(설정에도 연결) · already(설정에서 이미 다른 곳에 연결) · missing(설정에 같은 분류가 없음) · skipped
+   */
+  linkSnapshotItem(snapshotId, { lineId, itemCode, itemName, alsoSettings = false }) {
+    const code = normalizeName(itemCode, "품번", 60);
+    const name = String(itemName ?? code).trim().slice(0, 120) || code;
+    const targetLineId = positiveInteger(lineId, "집행서 줄 ID");
+    let settings = "skipped";
+    this.transaction(() => {
+      this.assertDraftSnapshot(snapshotId);
+      const line = this.db.prepare(`
+        SELECT id, major_name AS majorName, middle_name AS middleName, minor_name AS minorName
+        FROM snapshot_lines WHERE id = ? AND snapshot_id = ?
+      `).get(targetLineId, snapshotId);
+      if (!line) throw notFound("집행서 줄을 찾을 수 없습니다.");
+      const existing = this.db.prepare(`
+        SELECT sl.middle_name AS middleName, sl.minor_name AS minorName
+        FROM snapshot_items si JOIN snapshot_lines sl ON sl.id = si.snapshot_line_id
+        WHERE si.snapshot_id = ? AND si.item_code = ?
+      `).get(snapshotId, code);
+      if (existing) {
+        throw conflict(`이미 '${existing.minorName || existing.middleName}' 줄에 연결된 품번입니다.`);
+      }
+      this.db.prepare("INSERT INTO snapshot_items (snapshot_line_id, snapshot_id, item_code, item_name) VALUES (?, ?, ?, ?)")
+        .run(line.id, snapshotId, code, name);
+      this.touchSnapshot(snapshotId);
+
+      if (!alsoSettings) return;
+      const setId = this.db.prepare("SELECT category_set_id AS setId FROM snapshots WHERE id = ?").get(snapshotId)?.setId;
+      const target = setId ? this.findCategoryTarget(setId, line) : null;
+      if (!target) {
+        settings = "missing";
+        return;
+      }
+      const mapped = this.db.prepare("SELECT id FROM item_mappings WHERE category_set_id = ? AND item_code = ?").get(setId, code);
+      if (mapped) {
+        settings = "already";
+        return;
+      }
+      this.db.prepare("INSERT INTO item_mappings (category_set_id, middle_category_id, minor_category_id, item_code, item_name) VALUES (?, ?, ?, ?, ?)")
+        .run(setId, target.middleCategoryId, target.minorCategoryId, code, name);
+      this.touchCategorySet(setId);
+      settings = "linked";
+    });
+    return { settings, snapshot: this.getSnapshot(snapshotId) };
+  }
+
+  /** 집행서 줄의 분류 이름으로 설정 버전 안의 중분류 · 소분류를 찾습니다. 소분류가 생긴 중분류에는 소분류로만 연결합니다. */
+  findCategoryTarget(setId, { majorName, middleName, minorName }) {
+    const middle = this.db.prepare(`
+      SELECT mc.id FROM middle_categories mc JOIN major_categories jc ON jc.id = mc.major_category_id
+      WHERE jc.category_set_id = ? AND jc.name = ? AND mc.name = ?
+    `).get(setId, majorName, middleName);
+    if (!middle) return null;
+    if (!minorName) {
+      const hasMinors = this.db.prepare("SELECT 1 FROM minor_categories WHERE middle_category_id = ? LIMIT 1").get(middle.id);
+      return hasMinors ? null : { middleCategoryId: middle.id, minorCategoryId: null };
+    }
+    const minor = this.db.prepare("SELECT id FROM minor_categories WHERE middle_category_id = ? AND name = ?").get(middle.id, minorName);
+    return minor ? { middleCategoryId: middle.id, minorCategoryId: minor.id } : null;
   }
 
   deleteReceipts(snapshotId) {
     return this.transaction(() => {
       this.assertDraftSnapshot(snapshotId);
       const result = this.db.prepare("DELETE FROM receipts WHERE snapshot_id = ?").run(snapshotId);
+      // 전부 지우면 처음 상태로 돌아갑니다(불러온 기간 · 직접 뺀 입고 기록도 비움).
+      this.db.prepare("DELETE FROM receipt_exclusions WHERE snapshot_id = ?").run(snapshotId);
+      this.db.prepare("UPDATE snapshots SET receipt_from = NULL, receipt_to = NULL, receipts_fetched_at = NULL WHERE id = ?").run(snapshotId);
       this.touchSnapshot(snapshotId);
       return { deletedCount: result.changes, snapshot: this.getSnapshot(snapshotId) };
     });
@@ -1587,19 +1907,26 @@ export class AppDatabase {
   deleteReceipt(snapshotId, receiptId) {
     return this.transaction(() => {
       this.assertDraftSnapshot(snapshotId);
+      const receipt = this.db.prepare("SELECT source_key AS sourceKey FROM receipts WHERE id = ? AND snapshot_id = ?").get(receiptId, snapshotId);
+      if (!receipt) throw notFound("입고 내역을 찾을 수 없습니다.");
       const result = this.db.prepare("DELETE FROM receipts WHERE id = ? AND snapshot_id = ?").run(receiptId, snapshotId);
-      if (result.changes === 0) throw notFound("입고 내역을 찾을 수 없습니다.");
+      // 직접 뺀 입고는 새로 고침해도 다시 들어오지 않도록 기억해 둡니다.
+      this.db.prepare("INSERT OR IGNORE INTO receipt_exclusions (snapshot_id, source_key, excluded_at) VALUES (?, ?, ?)")
+        .run(snapshotId, receipt.sourceKey, nowIso());
       this.touchSnapshot(snapshotId);
       return { deletedCount: result.changes, snapshot: this.getSnapshot(snapshotId) };
     });
   }
 
+  /** 입고 목록. lineId 가 null 이면 분류에 연결되지 않은 '미분류' 입고입니다. */
   listReceipts(snapshotId) {
     return this.db.prepare(`
-      SELECT id, source_key AS sourceKey, receipt_no AS receiptNo, item_code AS itemCode,
-             item_name AS itemName, receipt_date AS receiptDate, amount, vat_amount AS vatAmount,
-             fetched_at AS fetchedAt
-      FROM receipts WHERE snapshot_id = ? ORDER BY receipt_date DESC, receipt_no DESC, id DESC
+      SELECT r.id, r.source_key AS sourceKey, r.receipt_no AS receiptNo, r.item_code AS itemCode,
+             r.item_name AS itemName, r.receipt_date AS receiptDate, r.amount, r.vat_amount AS vatAmount,
+             r.fetched_at AS fetchedAt, si.snapshot_line_id AS lineId
+      FROM receipts r
+      LEFT JOIN snapshot_items si ON si.snapshot_id = r.snapshot_id AND si.item_code = r.item_code
+      WHERE r.snapshot_id = ? ORDER BY r.receipt_date DESC, r.receipt_no DESC, r.id DESC
     `).all(snapshotId);
   }
 

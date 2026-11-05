@@ -67,6 +67,12 @@ async function seedDemo(server) {
     });
   await call(`/api/snapshots/${snapshot.id}/lines`, { method: "PUT", body: { lines, expectedRevision: current.revision } });
 
+  // 분류에 연결되지 않은 품번의 입고 1건(미분류 안내 · 줄에 연결 화면용).
+  server.database.importReceipts(snapshot.id, [{
+    sourceKey: "DEMO-LOOSE-1", receiptNo: "RV000011", itemCode: "HB-121816", itemName: "오일리스 부시",
+    receiptDate: toDate.replaceAll("-", ""), amount: 1_240_000, vatAmount: 124_000,
+  }]);
+
   // 품번 검색 화면에서 '연결' 할 수 있는 품목이 보이도록 하나를 풉니다(이미 만든 집행서는 그대로).
   const categories = await call("/api/categories");
   const testItem = categories.flatMap((major) => major.middleCategories)
@@ -156,7 +162,12 @@ async function openBrowser() {
       socket.close();
       child.kill();
       await sleep(400);
-      rmSync(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+      // Edge 가 프로필 파일을 늦게 놓아 주는 경우가 있어, 못 지우면 임시 폴더에 남겨 둡니다.
+      try {
+        rmSync(profile, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 });
+      } catch {
+        console.warn(`  (임시 브라우저 프로필을 지우지 못했습니다: ${profile})`);
+      }
     },
   };
 }
@@ -169,7 +180,9 @@ const markerRules = [];
  * selectors 를 모두 덮는 영역을 찍고, markers 의 각 요소 왼쪽 위 모서리에 번호를 둘 위치를 기록합니다.
  * maxBottom 을 주면 그 요소의 아래 끝에서 자릅니다(긴 표의 앞부분만).
  */
-async function shoot(browser, name, { selectors, markers = [], padding = 12, maxBottom = null }) {
+async function shoot(browser, name, { selectors, markers = [], padding = 12, maxBottom = null, fixed = false }) {
+  // 대화상자 · 저장 막대처럼 화면에 고정된 요소는 맨 위로 올린 뒤 보이는 화면 그대로 찍습니다.
+  if (fixed) await browser.evaluate("window.scrollTo(0, 0)");
   const geometry = await browser.evaluate(`(() => {
     const box = (el) => { const r = el.getBoundingClientRect(); return { x: r.left + scrollX, y: r.top + scrollY, w: r.width, h: r.height }; };
     const pick = (selector) => { const el = document.querySelector(selector); if (!el) throw new Error('없는 요소: ' + selector); return el; };
@@ -187,7 +200,7 @@ async function shoot(browser, name, { selectors, markers = [], padding = 12, max
     height: geometry.y1 - geometry.y0 + padding * 2,
     scale: 1,
   };
-  const shot = await browser.send("Page.captureScreenshot", { format: "webp", quality: 90, clip, captureBeyondViewport: true });
+  const shot = await browser.send("Page.captureScreenshot", { format: "webp", quality: 90, clip, captureBeyondViewport: !fixed });
   writeFileSync(join(IMAGE_DIR, `${name}.webp`), Buffer.from(shot.data, "base64"));
   // 그림이 늦게 떠도 자리가 미리 잡혀 목차로 이동할 때 위치가 어긋나지 않게 합니다.
   markerRules.push(`.shot[data-shot="${name}"] img { aspect-ratio: ${Math.round(clip.width)} / ${Math.round(clip.height)}; }`);
@@ -231,25 +244,46 @@ async function main() {
     })()`);
     await sleep(1200);
     if (!(await browser.evaluate("location.pathname === '/'"))) await browser.goto(`${server.origin}/`);
+    // 로그인하면 기성집행서 목록이 열립니다.
+    await browser.viewport(1440, 900);
+    await browser.waitFor("document.querySelectorAll('#statementListRows .list-row').length > 0", "기성집행서 목록");
+    await sleep(300);
+    await shoot(browser, "statement-list", {
+      selectors: ["#listScreen .table-panel"],
+      markers: ["#statementListSearch", "#statementListLatest", "#newStatementButton", "#statementListRows .list-row"],
+    });
+
+    // 새 기성집행서 창
+    await browser.evaluate("document.querySelector('#newStatementButton').click()");
+    await browser.waitFor("document.querySelector('#newStatementDialog').open && document.querySelectorAll('#newStatementList .project-option').length > 0", "새 기성집행서");
+    await sleep(300);
+    await shoot(browser, "new-statement", {
+      selectors: ["#newStatementDialog"],
+      padding: 0,
+      fixed: true,
+      markers: ["#newStatementSearch", ".picker-filters .segmented", "#newStatementList .project-option", ".method-cards", '#newStatementForm button[value="confirm"]'],
+    });
+    await browser.evaluate("document.querySelector('#newStatementDialog').close('cancel')");
+
+    // 목록의 줄을 누르면 그 집행서가 탭으로 열립니다.
+    await browser.evaluate("document.querySelector('#statementListRows .list-row').click()");
     await browser.waitFor("!document.querySelector('#snapshotContent').classList.contains('hidden') && document.querySelectorAll('.statement-line').length > 0", "집행서");
 
     // 전체 화면(보통 노트북 크기)
-    await browser.viewport(1440, 900);
     await sleep(500);
     await shoot(browser, "overview", {
       selectors: [".app-shell"],
       maxBottom: ".import-panel",
       padding: 0,
-      markers: [".sidebar .nav-item", ".project-toolbar", ".snapshot-bar", ".summary-grid", ".import-panel", "#helpButton"],
+      markers: [".sidebar .nav-item", "#tabBar .tab.active", ".page-head", ".project-toolbar", ".summary-grid", "#helpButton"],
     });
-    await shoot(browser, "topbar", { selectors: [".topbar-actions"], markers: ["#helpButton", "#userMenuButton"] });
 
     // 부분 화면은 세로로 넉넉한 창에서 찍습니다.
     await browser.viewport(1440, 2600);
     await sleep(500);
     await shoot(browser, "project-bar", {
       selectors: [".project-toolbar", ".snapshot-bar"],
-      markers: ["#projectFilter", "#projectSelect", "#cloneSnapshotButton", "#newSnapshotButton", "#snapshotSelect", "#toggleSnapshotStatusButton"],
+      markers: ["#statementProject", "#cloneSnapshotButton", "#newSnapshotButton", "#snapshotSelect", "#toggleSnapshotStatusButton"],
     });
     await shoot(browser, "summary", {
       selectors: [".summary-grid"],
@@ -257,10 +291,10 @@ async function main() {
     });
     await shoot(browser, "import", {
       selectors: [".import-panel"],
-      markers: ["#fromDate", "#toDate", "#replaceReceipts", "#importReceiptsButton"],
+      markers: ["#receiptSource", "#fromDate", "#toDate", "#replaceReceipts", "#refreshReceiptsButton", "#importReceiptsButton"],
     });
     await shoot(browser, "table", {
-      selectors: [".table-panel"],
+      selectors: ["#statementScreen .table-panel"],
       maxBottom: '[data-subtotal="0"]',
       markers: [".merged-middle-cell", ".statement-line .minor-cell", ".budget-input", ".middle-subtotal", '[data-subtotal="0"]', "#saveStatementButton", "#printStatementButton", "#exportExcelButton"],
     });
@@ -269,13 +303,48 @@ async function main() {
       padding: 0,
       markers: ['[data-subtotal="2"]', "#statementTotals"],
     });
+    await shoot(browser, "unmapped", { selectors: ["#unmappedNotice"], markers: ["#showUnmappedButton"] });
     await browser.evaluate("document.querySelector('.receipt-details').open = true");
     await sleep(300);
     await shoot(browser, "receipts", {
       selectors: [".receipt-details"],
       maxBottom: "#receiptRows tr:nth-child(5)",
-      markers: [".receipt-details summary", "#clearReceiptsButton", "#receiptRows tr:first-child .delete-receipt"],
+      markers: [".receipt-details summary", "#receiptSearch", "#receiptFilter", "#receiptRows .link-receipt", "#receiptTotals", "#clearReceiptsButton"],
     });
+
+    // 대화상자 · 저장 막대(화면에 고정된 요소)는 보통 크기 창에서 찍습니다.
+    await browser.viewport(1440, 1000);
+    await sleep(400);
+    await browser.evaluate("document.querySelector('.statement-line .item-count').click()");
+    await browser.waitFor("document.querySelector('#lineDetailDialog').open", "줄 상세");
+    await shoot(browser, "line-detail", {
+      selectors: ["#lineDetailDialog"],
+      padding: 0,
+      fixed: true,
+      markers: ["#lineDetailSummary", "#lineDetailItems tr:first-child", "#lineDetailReceiptsButton"],
+    });
+    await browser.evaluate("document.querySelector('#lineDetailDialog').close('cancel')");
+    await browser.evaluate("document.querySelector('#receiptRows .link-receipt').click()");
+    await browser.waitFor("document.querySelector('#linkItemDialog').open", "미분류 연결");
+    await shoot(browser, "link-item", {
+      selectors: ["#linkItemDialog"],
+      padding: 0,
+      fixed: true,
+      markers: ["#linkItemSummary", "#linkItemLine", "#linkItemAlsoSettings", '#linkItemDialog button[value="confirm"]'],
+    });
+    await browser.evaluate("document.querySelector('#linkItemDialog').close('cancel')");
+    await browser.evaluate(`(() => {
+      const input = document.querySelector('.budget-input');
+      input.value = '82000000';
+      input.dispatchEvent(new Event('input'));
+    })()`);
+    await sleep(300);
+    await shoot(browser, "save-bar", { selectors: ["#saveBar"], fixed: true, markers: ["#discardChangesButton", "#saveBarButton"] });
+    // 다음 화면으로 넘어가기 전에 입력을 되돌립니다(되돌리기 → 확인).
+    await browser.evaluate("document.querySelector('#discardChangesButton').click()");
+    await browser.waitFor("document.querySelector('#confirmDialog').open", "되돌리기 확인");
+    await browser.evaluate("document.querySelector('#confirmDialogConfirm').click()");
+    await sleep(300);
 
     // 분류 · 품번 설정 (네 칸이 한 줄에 보이는 넓은 창)
     await browser.viewport(1680, 1400);
@@ -283,17 +352,23 @@ async function main() {
     await browser.waitFor("document.querySelectorAll('#minorList .master-row').length > 0", "소분류");
     await shoot(browser, "settings", {
       selectors: [".version-bar", ".settings-layout"],
-      markers: ["#categorySetSelect", "#addMajorButton", "#addMiddleButton", "#addMinorButton", ".item-panel .panel-heading"],
+      markers: ["#categorySetSelect", "#addMajorButton", "#addMiddleButton", "#addMinorButton", "#openItemPickerButton"],
     });
-    await browser.evaluate(`(() => {
-      document.querySelector('#itemSearchInput').value = 'test';
-      document.querySelector('#itemSearchButton').click();
-    })()`);
-    await browser.waitFor("document.querySelectorAll('#itemSearchResults .search-result').length > 0", "품번 검색");
-    await shoot(browser, "item-search", {
-      selectors: [".item-panel .item-search-row", "#itemSearchResults"],
-      markers: ["#itemSearchInput", "#itemSearchButton", "#itemSearchResults .search-result button", ".refresh-item-list"],
+
+    // 품번 검색 창: 전체 품목을 띄우고 미연결 품번 하나를 골라 둔 모습
+    await browser.viewport(1440, 1000);
+    await browser.evaluate("document.querySelector('#openItemPickerButton').click()");
+    await browser.waitFor("document.querySelectorAll('#itemPickerRows .pick-row').length > 0", "품번 검색 창");
+    await browser.waitFor("document.querySelector('#itemPickerReceivedCount').textContent !== ''", "미연결 품번 수");
+    await browser.evaluate("document.querySelector('#itemPickerRows .pick-row:not(.disabled)').click()");
+    await sleep(200);
+    await shoot(browser, "item-picker", {
+      selectors: ["#itemPickerDialog"],
+      padding: 0,
+      fixed: true,
+      markers: ['.picker-tab[data-scope="received"]', "#itemPickerQuery", ".segmented", "#itemPickerMove", "#itemPickerAll", "#itemPickerLink"],
     });
+    await browser.evaluate("document.querySelector('#itemPickerDialog').close('cancel')");
 
     // 접속 · 보안
     await browser.viewport(1440, 2000);
@@ -318,6 +393,26 @@ async function main() {
     await shoot(browser, "users", {
       selectors: ["#manualUsersPanel"],
       markers: ["#addUserButton", "#userRows tr:nth-child(2) .role-select", "#userRows tr:nth-child(2) .toggle-user", "#userRows tr:nth-child(2) .reset-password"],
+    });
+
+    // 프로젝트 · 자동 동기화
+    await browser.viewport(1440, 1200);
+    await openScreen(browser, "projects");
+    await browser.waitFor("document.querySelectorAll('#projectListRows tr').length > 0", "프로젝트");
+    await shoot(browser, "projects", {
+      selectors: ["#projectsScreen .sync-panel", "#projectsScreen .table-panel"],
+      markers: ["#syncProjectsButton", "#syncEnabled", "#syncMode", '#projectSyncForm button[type="submit"]', "#projectListRows .table-action"],
+    });
+
+    // 위쪽 탭 줄: 지금까지 연 화면이 탭으로 남아 있습니다.
+    await browser.viewport(1680, 900);
+    await sleep(600);
+    await browser.evaluate("document.querySelector('#tabBar').scrollLeft = 0");
+    await shoot(browser, "tabs", {
+      selectors: [".topbar"],
+      padding: 0,
+      fixed: true,
+      markers: ['#tabBar .tab[data-key="screen:list"]', '#tabBar .tab[data-key^="project:"]', "#tabBar .tab.active .tab-x", "#helpButton", "#userMenuButton"],
     });
 
     writeFileSync(join(OUTPUT_DIR, "shots.css"),

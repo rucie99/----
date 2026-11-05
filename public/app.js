@@ -12,6 +12,9 @@ const API = Object.freeze({
   AMARANCE_SETTINGS_TEST: "/api/amarance/settings/test",
   SECURITY_SETTINGS: "/api/security/settings",
   PROJECT_SYNC: "/api/projects/sync",
+  PROJECTS: "/api/projects",
+  PROJECT_SYNC_SCHEDULE: "/api/project-sync/schedule",
+  SNAPSHOTS: "/api/snapshots",
   USERS: "/api/users",
   CATEGORY_SETS: "/api/category-sets",
   RESET: "/api/admin/reset",
@@ -22,6 +25,8 @@ const API = Object.freeze({
 
 const SNAPSHOT_STATUS = Object.freeze({ DRAFT: "DRAFT", CONFIRMED: "CONFIRMED" });
 const SCREEN = Object.freeze({
+  LIST: "list",
+  PROJECTS: "projects",
   STATEMENT: "statement",
   SETTINGS: "settings",
   AMARANCE: "amarance",
@@ -29,13 +34,16 @@ const SCREEN = Object.freeze({
   USERS: "users",
   AUDIT: "audit",
 });
-const SCREEN_TITLE = Object.freeze({
-  statement: "기성집행서",
-  settings: "분류 · 품번 설정",
-  amarance: "아마란스10 설정",
-  security: "접속 · 보안",
-  users: "사용자",
-  audit: "활동 기록",
+/** 화면마다 탭 · 머리에 쓰는 아이콘, 이름, 한 줄 설명. */
+const SCREEN_META = Object.freeze({
+  list: { icon: "▦", title: "기성집행서 목록", desc: "등록된 기성집행서를 프로젝트 · 버전별로 봅니다. 줄을 누르면 탭으로 열립니다." },
+  projects: { icon: "◫", title: "프로젝트", desc: "아마란스10 프로젝트를 가져오고, 자동 동기화 일정을 정합니다." },
+  statement: { icon: "▤", title: "기성집행서", desc: "실행예산을 입력하고 입고 내역과 견주어 예상 이익률을 확인합니다. 저장 전 입력은 이 컴퓨터에 보관됩니다." },
+  settings: { icon: "⚙", title: "분류 · 품번 설정", desc: "대분류 · 중분류 · 소분류를 만들고 품번을 연결합니다." },
+  amarance: { icon: "↗", title: "아마란스10 설정", desc: "아마란스10 연결 주소와 인증 정보를 설정합니다." },
+  security: { icon: "⛨", title: "접속 · 보안", desc: "접속을 허용할 주소와 로그인 보안 규칙을 정합니다." },
+  users: { icon: "☺", title: "사용자", desc: "사용자를 추가하고 권한을 정합니다." },
+  audit: { icon: "≡", title: "활동 기록", desc: "누가 언제 무엇을 했는지 확인합니다." },
 });
 const REPORT_STATUS_LABEL = Object.freeze({ DRAFT: "작성중", CONFIRMED: "확정" });
 const ROLE_LABEL = Object.freeze({ ADMIN: "관리자", EDITOR: "작성자", VIEWER: "조회자" });
@@ -74,9 +82,15 @@ const state = {
   users: [],
   auditOffset: 0,
   auditTotal: 0,
-  screen: SCREEN.STATEMENT,
+  screen: SCREEN.LIST,
   dirty: false,
-  receiptSkipNotice: "",
+  tabs: [],
+  activeTabKey: null,
+  drafts: {},
+  statementList: [],
+  projectList: [],
+  projectSync: null,
+  integrationLoaded: false,
 };
 
 const elements = Object.fromEntries([...document.querySelectorAll("[id]")].map((element) => [element.id, element]));
@@ -278,52 +292,65 @@ elements.confirmDialogForm.addEventListener("submit", (event) => {
 function setDirty(dirty) {
   state.dirty = dirty;
   elements.dirtyFlag.classList.toggle("hidden", !dirty);
+  // 표를 내려 저장 버튼이 안 보여도 저장할 수 있게, 변경이 있으면 화면 아래에 저장 막대를 띄웁니다.
+  elements.saveBar.classList.toggle("hidden", !dirty || state.screen !== SCREEN.STATEMENT);
   elements.saveHint.textContent = dirty
     ? "저장하지 않은 변경이 있습니다."
     : "실행예산과 비고를 입력한 뒤 저장하세요.";
 }
 
-async function confirmDiscardChanges() {
-  if (!state.dirty) return true;
-  const discard = await askConfirm({
-    title: "저장하지 않은 변경이 있습니다",
-    message: "지금 이동하면 입력한 실행예산과 비고가 사라집니다. 이동할까요?",
-    confirmLabel: "저장하지 않고 이동",
-    danger: true,
-  });
-  if (discard) setDirty(false);
-  return discard;
+function canEditSnapshot() {
+  return Boolean(state.snapshot) && state.snapshot.status === SNAPSHOT_STATUS.DRAFT && state.permissions.canEdit;
 }
 
-window.addEventListener("beforeunload", (event) => {
-  if (!state.dirty) return;
+// Ctrl+S(맥은 Cmd+S)로 집행서를 저장합니다. 브라우저의 '페이지 저장'은 막습니다.
+document.addEventListener("keydown", (event) => {
+  if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== "s") return;
+  if (state.screen !== SCREEN.STATEMENT) return;
   event.preventDefault();
-  event.returnValue = "";
+  if (canEditSnapshot() && state.dirty) ignoreFailure(saveStatement());
 });
 
 // ------------------------------------------------------------------ 화면 전환
 
 async function setScreen(screen) {
-  if (state.screen === SCREEN.STATEMENT && screen !== SCREEN.STATEMENT && !await confirmDiscardChanges()) return;
   state.screen = screen;
+  elements.saveBar.classList.toggle("hidden", !state.dirty || screen !== SCREEN.STATEMENT);
+  // 집행서 화면은 '기성집행서' 메뉴 아래에 있는 것으로 표시합니다.
+  const navScreen = screen === SCREEN.STATEMENT ? SCREEN.LIST : screen;
   document.querySelectorAll(".nav-item").forEach((button) => {
-    const active = button.dataset.screen === screen;
+    const active = button.dataset.screen === navScreen;
     button.classList.toggle("active", active);
     if (active) button.setAttribute("aria-current", "page");
     else button.removeAttribute("aria-current");
   });
-  elements.statementScreen.classList.toggle("active", screen === SCREEN.STATEMENT);
-  elements.settingsScreen.classList.toggle("active", screen === SCREEN.SETTINGS);
-  elements.amaranceSettingsScreen.classList.toggle("active", screen === SCREEN.AMARANCE);
-  elements.securityScreen.classList.toggle("active", screen === SCREEN.SECURITY);
-  elements.usersScreen.classList.toggle("active", screen === SCREEN.USERS);
-  elements.auditScreen.classList.toggle("active", screen === SCREEN.AUDIT);
-  elements.pageTitle.textContent = SCREEN_TITLE[screen];
+  const sections = {
+    [SCREEN.LIST]: elements.listScreen,
+    [SCREEN.PROJECTS]: elements.projectsScreen,
+    [SCREEN.STATEMENT]: elements.statementScreen,
+    [SCREEN.SETTINGS]: elements.settingsScreen,
+    [SCREEN.AMARANCE]: elements.amaranceSettingsScreen,
+    [SCREEN.SECURITY]: elements.securityScreen,
+    [SCREEN.USERS]: elements.usersScreen,
+    [SCREEN.AUDIT]: elements.auditScreen,
+  };
+  for (const [name, section] of Object.entries(sections)) section.classList.toggle("active", name === screen);
+  const meta = SCREEN_META[screen];
+  elements.pageIcon.textContent = meta.icon;
+  elements.pageTitle.textContent = meta.title;
+  elements.pageDesc.textContent = meta.desc;
+  document.title = `${meta.title} · 경기산업 기성집행서`;
 
+  if (screen === SCREEN.LIST) await ignoreFailure(loadStatementList());
+  if (screen === SCREEN.PROJECTS) await ignoreFailure(loadProjectList());
   if (screen === SCREEN.SETTINGS) await ignoreFailure(refreshCategorySets(state.selectedCategorySetId));
   if (screen === SCREEN.USERS) await ignoreFailure(loadUsers());
   if (screen === SCREEN.AUDIT) await ignoreFailure(loadAuditLogs(0));
-  if (screen === SCREEN.SECURITY || screen === SCREEN.AMARANCE) await ignoreFailure(loadIntegrationSettings());
+  // 연동 · 보안 설정은 처음 열 때만 불러와, 탭을 오가도 고치던 값이 지워지지 않게 합니다.
+  if ((screen === SCREEN.SECURITY || screen === SCREEN.AMARANCE) && !state.integrationLoaded) {
+    state.integrationLoaded = true;
+    await ignoreFailure(loadIntegrationSettings());
+  }
 }
 
 function applyPermissions() {
@@ -353,6 +380,9 @@ function renderProjects() {
   }
   elements.projectSelect.value = String(state.selectedProjectId || "");
   const project = state.projects.find((item) => item.id === Number(state.selectedProjectId));
+  elements.statementProject.innerHTML = project
+    ? `<span class="section-kicker">PROJECT</span><strong>${escapeHtml(project.code)}</strong><span>${escapeHtml(project.name)}</span>`
+    : "";
   elements.projectMeta.innerHTML = project
     ? `<strong>${formatWon(project.contractAmount)}</strong>`
       + `<span>${project.status === "ACTIVE" ? "진행 프로젝트" : "완료 프로젝트"}</span>`
@@ -368,10 +398,13 @@ async function loadSnapshots(preferredSnapshotId = null) {
     return;
   }
   state.snapshots = await api(`/api/projects/${state.selectedProjectId}/snapshots`);
-  const selectedId = preferredSnapshotId || state.snapshots[0]?.id;
+  const preferred = state.snapshots.some((item) => item.id === Number(preferredSnapshotId)) ? Number(preferredSnapshotId) : null;
+  const selectedId = preferred || state.snapshots[0]?.id;
   state.snapshot = selectedId ? await api(`/api/snapshots/${selectedId}`) : null;
   setDirty(false);
   renderSnapshot();
+  syncStatementTab();
+  if (state.dirty) showToast("저장하지 않았던 입력을 이어서 보여 줍니다. 저장하거나 '되돌리기'를 눌러 주세요.");
 }
 
 // ------------------------------------------------------------------ 집행서 렌더링
@@ -492,18 +525,21 @@ function renderStatementRows() {
       <tr class="statement-line" data-line-id="${line.id}">
         ${takeMajorCell()}
         ${categoryCells}
-        <td><span class="item-count ${line.items.length ? "" : "missing"}">${itemCountText(line.items)}</span></td>
-        <td class="number-cell">
+        <td><button type="button" class="item-count ${line.items.length ? "" : "missing"}" data-line-detail="${line.id}" title="연결 품번과 입고 내역 보기">${itemCountText(line.items)}</button></td>
+        <td class="number-cell">${editable ? `
           <label class="visually-hidden" for="budget-${line.id}">${label} 실행예산</label>
           <input id="budget-${line.id}" class="inline-input budget-input" type="text" inputmode="numeric" autocomplete="off"
-                 value="${Number(line.executionBudget).toLocaleString("ko-KR")}" ${editable ? "" : "disabled"}>
+                 value="${Number(line.executionBudget).toLocaleString("ko-KR")}">`
+          // 확정본이나 조회자는 입력칸 대신 숫자만 보여 표를 깔끔하게 합니다.
+          : `<span class="amount-text">${formatWon(line.executionBudget)}</span>`}
         </td>
         <td class="number-cell purchase-cell">${formatWon(line.purchaseAmount)}</td>
         <td class="number-cell balance-cell">${amountCellMarkup(line.balanceAmount)}</td>
         <td class="rate-cell">${progressMarkup(line.executionRate)}</td>
-        <td>
+        <td>${editable ? `
           <label class="visually-hidden" for="remark-${line.id}">${label} 비고</label>
-          <input id="remark-${line.id}" class="inline-input remark-input" value="${escapeHtml(line.remark)}" maxlength="200" ${editable ? "" : "disabled"}>
+          <input id="remark-${line.id}" class="inline-input remark-input" value="${escapeHtml(line.remark)}" maxlength="200">`
+          : `<span class="remark-text">${escapeHtml(line.remark)}</span>`}
         </td>
       </tr>`;
       }).join("");
@@ -525,6 +561,9 @@ function renderStatementRows() {
   }).join("");
   applyProgressWidths(elements.statementRows);
   attachStatementInputEvents();
+  elements.statementRows.querySelectorAll("[data-line-detail]").forEach((button) =>
+    button.addEventListener("click", () => openLineDetail(button.dataset.lineDetail)));
+  applyDraft();
 }
 
 /** 중분류 소계 · 대분류 합계 행의 금액 칸 네 개. */
@@ -575,16 +614,24 @@ function attachStatementInputEvents() {
   for (const input of inputs) {
     if (input.classList.contains("budget-input")) {
       input.addEventListener("focus", () => {
-        input.value = String(parseBudgetInput(input.value));
+        const amount = parseBudgetInput(input.value);
+        // 0 이 칸에 남아 있으면 입력한 숫자 앞뒤로 붙어 10배 금액이 되므로 비워 둡니다.
+        input.value = amount ? String(amount) : "";
+        // 클릭으로 들어오면 마우스를 뗄 때 선택이 풀리므로 한 박자 뒤에 전체 선택합니다.
+        setTimeout(() => { if (document.activeElement === input) input.select(); }, 0);
       });
       input.addEventListener("input", () => {
         input.value = input.value.replace(/[^0-9]/g, "");
         setDirty(true);
         refreshDerivedCells();
+        captureDraft();
       });
       input.addEventListener("blur", () => formatBudgetInput(input));
     } else {
-      input.addEventListener("input", () => setDirty(true));
+      input.addEventListener("input", () => {
+        setDirty(true);
+        captureDraft();
+      });
     }
     input.addEventListener("keydown", (event) => {
       if (event.key !== "Enter" || event.isComposing) return;
@@ -602,32 +649,247 @@ function attachStatementInputEvents() {
   }
 }
 
+// ------------------------------------------------------------------ 입고 기준 · 새로 고침
+
+/** 마지막으로 불러온 지 이만큼 지나면 '오래된 자료' 로 안내합니다. */
+const RECEIPT_STALE_MS = 24 * 60 * 60 * 1000;
+
+function formatCompactDate(value) {
+  const text = String(value || "");
+  return /^\d{8}$/.test(text) ? `${text.slice(0, 4)}-${text.slice(4, 6)}-${text.slice(6, 8)}` : text;
+}
+
+function renderReceiptSource() {
+  const snapshot = state.snapshot;
+  const source = snapshot.receiptSource || {};
+  const isDraft = snapshot.status === SNAPSHOT_STATUS.DRAFT;
+  const fetchedAt = source.fetchedAt ? new Date(source.fetchedAt) : null;
+  const stale = isDraft && fetchedAt && Date.now() - fetchedAt.getTime() > RECEIPT_STALE_MS;
+
+  if (!fetchedAt) {
+    elements.receiptSource.textContent = "아직 불러온 입고가 없습니다. 기간을 정하고 매입금액 불러오기를 누르세요.";
+  } else {
+    const range = source.from ? ` · 조회 기간 ${formatCompactDate(source.from)} ~ ${formatCompactDate(source.to)}` : "";
+    const excluded = source.excludedCount ? ` · 직접 뺀 입고 ${source.excludedCount.toLocaleString("ko-KR")}건 제외` : "";
+    elements.receiptSource.textContent = `입고 기준 ${formatDateTime(source.fetchedAt)}${range}${excluded}`
+      + (stale ? " — 하루 넘게 지난 자료입니다. '최신으로 새로 고침'을 눌러 주세요." : "");
+  }
+  elements.receiptSource.classList.toggle("stale", Boolean(stale));
+  elements.purchaseBasis.textContent = fetchedAt
+    ? `${isDraft ? "" : "확정 당시 "}입고 기준 ${formatDateTime(source.fetchedAt)}`
+    : "아직 불러온 입고 없음";
+  elements.refreshReceiptsButton.disabled = !canEditSnapshot() || !source.from;
+
+  // 이 버전을 처음 열 때, 불러오기 시작일을 지금까지 불러온 기간의 시작일로 맞춰 둡니다(종료일은 오늘).
+  if (state.receiptDatesFor !== snapshot.id) {
+    state.receiptDatesFor = snapshot.id;
+    if (source.from) {
+      elements.fromDate.value = formatCompactDate(source.from);
+      elements.toDate.value = new Date().toISOString().slice(0, 10);
+    }
+  }
+}
+
+/** 이 버전에 불러온 기간 전체를 다시 조회해 아마란스10과 맞춥니다. */
+async function refreshReceipts() {
+  const result = await busy(() => api(`/api/snapshots/${state.snapshot.id}/receipts/refresh`, { method: "POST", body: "{}" }));
+  state.snapshot = result.snapshot;
+  setDirty(false);
+  renderSnapshot();
+  const changes = [];
+  if (result.addedCount) changes.push(`새 입고 ${result.addedCount.toLocaleString("ko-KR")}건`);
+  if (result.changedCount) changes.push(`금액이 바뀐 입고 ${result.changedCount.toLocaleString("ko-KR")}건`);
+  if (result.removedCount) changes.push(`아마란스10에서 사라진 입고 ${result.removedCount.toLocaleString("ko-KR")}건 정리`);
+  const unmapped = result.snapshot.unmapped?.count ? ` 미분류 입고가 ${result.snapshot.unmapped.count.toLocaleString("ko-KR")}건 있습니다.` : "";
+  showToast(changes.length
+    ? `최신으로 맞췄습니다: ${changes.join(" · ")}.${unmapped}`
+    : `바뀐 입고가 없습니다. 최신 상태입니다.${unmapped}`);
+}
+
+// ------------------------------------------------------------------ 입고 상세 · 미분류
+
+const RECEIPT_FILTER = Object.freeze({ ALL: "all", UNMAPPED: "unmapped" });
+
+/** "자재비 › 구매품 › 구입품비" 처럼 줄의 분류 경로. */
+function lineLabel(line) {
+  return [line.majorName, line.middleName, line.minorName].filter(Boolean).join(" › ");
+}
+
+function findLine(lineId) {
+  return state.snapshot?.lines.find((line) => line.id === Number(lineId)) || null;
+}
+
+function sumAmount(rows, key = "amount") {
+  return rows.reduce((sum, row) => sum + (Number(row[key]) || 0), 0);
+}
+
+function renderUnmappedNotice() {
+  const unmapped = state.snapshot.unmapped || { count: 0 };
+  elements.unmappedNotice.classList.toggle("hidden", !unmapped.count);
+  if (!unmapped.count) return;
+  elements.unmappedDetail.textContent =
+    `품번 ${unmapped.itemCount.toLocaleString("ko-KR")}개 · 입고 ${unmapped.count.toLocaleString("ko-KR")}건 · ${formatWon(unmapped.amount)}이 `
+    + "아직 어느 줄에도 들어가지 않아 매입금액에서 빠져 있습니다. 확인하고 알맞은 줄에 연결해 주세요.";
+}
+
+function renderReceiptFilterOptions() {
+  const snapshot = state.snapshot;
+  const previous = elements.receiptFilter.value || RECEIPT_FILTER.ALL;
+  const countByLine = new Map();
+  for (const receipt of snapshot.receipts) {
+    if (receipt.lineId) countByLine.set(receipt.lineId, (countByLine.get(receipt.lineId) || 0) + 1);
+  }
+  const groups = groupExecutionLines(snapshot.lines);
+  elements.receiptFilter.innerHTML = `
+    <option value="${RECEIPT_FILTER.ALL}">전체 분류</option>
+    <option value="${RECEIPT_FILTER.UNMAPPED}">미분류만 (${(snapshot.unmapped?.count || 0).toLocaleString("ko-KR")}건)</option>
+    ${groups.map((group) => `
+      <optgroup label="${escapeHtml(group.majorName)}">
+        ${group.lines.map((line) => `<option value="line-${line.id}">${escapeHtml([line.middleName, line.minorName].filter(Boolean).join(" › "))} (${(countByLine.get(line.id) || 0).toLocaleString("ko-KR")}건)</option>`).join("")}
+      </optgroup>`).join("")}`;
+  const values = [...elements.receiptFilter.options].map((option) => option.value);
+  elements.receiptFilter.value = values.includes(previous) ? previous : RECEIPT_FILTER.ALL;
+}
+
+function filteredReceipts() {
+  const filter = elements.receiptFilter.value || RECEIPT_FILTER.ALL;
+  const keyword = elements.receiptSearch.value.trim().toLowerCase();
+  return state.snapshot.receipts.filter((receipt) => {
+    if (filter === RECEIPT_FILTER.UNMAPPED && receipt.lineId) return false;
+    if (filter.startsWith("line-") && String(receipt.lineId) !== filter.slice(5)) return false;
+    if (!keyword) return true;
+    return [receipt.itemCode, receipt.itemName, receipt.receiptNo].some((value) => String(value || "").toLowerCase().includes(keyword));
+  });
+}
+
 function renderReceipts() {
-  const receipts = state.snapshot.receipts;
-  const editable = state.snapshot.status === SNAPSHOT_STATUS.DRAFT && state.permissions.canEdit;
-  elements.receiptCount.textContent = `${receipts.length.toLocaleString("ko-KR")}건`;
-  elements.receiptSkipNotice.textContent = state.receiptSkipNotice;
-  elements.receiptSkipNotice.classList.toggle("hidden", !state.receiptSkipNotice);
-  elements.receiptRows.innerHTML = receipts.length ? receipts.map((receipt) => `
-    <tr data-receipt-id="${receipt.id}">
+  const snapshot = state.snapshot;
+  const editable = canEditSnapshot();
+  const unmappedCount = snapshot.unmapped?.count || 0;
+  elements.receiptCount.textContent = `${snapshot.receipts.length.toLocaleString("ko-KR")}건`
+    + (unmappedCount ? ` · 미분류 ${unmappedCount.toLocaleString("ko-KR")}건` : "");
+  elements.receiptCount.classList.toggle("has-unmapped", unmappedCount > 0);
+  renderUnmappedNotice();
+  renderReceiptSource();
+  renderReceiptFilterOptions();
+
+  const rows = filteredReceipts();
+  elements.receiptSummary.textContent = rows.length === snapshot.receipts.length
+    ? ""
+    : `${rows.length.toLocaleString("ko-KR")}건 표시 중`;
+  elements.receiptRows.innerHTML = rows.length ? rows.map((receipt) => {
+    const line = receipt.lineId ? findLine(receipt.lineId) : null;
+    const category = line
+      ? `<span class="receipt-line">${escapeHtml(lineLabel(line))}</span>`
+      : `<span class="unmapped-tag">미분류</span>${editable
+        ? `<button class="row-action link-receipt" data-item-code="${escapeHtml(receipt.itemCode)}" data-item-name="${escapeHtml(receipt.itemName)}">줄에 연결</button>`
+        : ""}`;
+    return `
+    <tr data-receipt-id="${receipt.id}" class="${line ? "" : "unmapped-row"}">
       <td>${escapeHtml(receipt.receiptDate)}</td>
       <td>${escapeHtml(receipt.receiptNo)}</td>
-      <td>${escapeHtml(receipt.itemCode)}</td>
+      <td><code>${escapeHtml(receipt.itemCode)}</code></td>
       <td>${escapeHtml(receipt.itemName)}</td>
+      <td class="category-cell">${category}</td>
       <td class="number-cell">${formatWon(receipt.amount)}</td>
       <td class="number-cell">${formatWon(receipt.vatAmount)}</td>
       <td class="editor-only"><button class="row-action danger delete-receipt" ${editable ? "" : "disabled"}>삭제</button></td>
-    </tr>
-  `).join("") : '<tr><td class="empty-row" colspan="7">불러온 입고 내역이 없습니다.</td></tr>';
+    </tr>`;
+  }).join("") : `<tr><td class="empty-row" colspan="8">${snapshot.receipts.length ? "조건에 맞는 입고가 없습니다." : "불러온 입고 내역이 없습니다."}</td></tr>`;
+  elements.receiptTotals.innerHTML = rows.length ? `
+    <tr>
+      <td colspan="5">합계 · ${rows.length.toLocaleString("ko-KR")}건</td>
+      <td class="number-cell">${formatWon(sumAmount(rows))}</td>
+      <td class="number-cell">${formatWon(sumAmount(rows, "vatAmount"))}</td>
+      <td class="editor-only"></td>
+    </tr>` : "";
 
   elements.receiptRows.querySelectorAll(".delete-receipt").forEach((button) => {
     button.addEventListener("click", () => deleteReceipt(Number(button.closest("tr").dataset.receiptId)));
   });
+  elements.receiptRows.querySelectorAll(".link-receipt").forEach((button) => {
+    button.addEventListener("click", () => ignoreFailure(linkUnmappedItem(button.dataset.itemCode, button.dataset.itemName)));
+  });
+}
+
+/** 입고 상세 내역을 펼치고 원하는 조건으로 거른 뒤 그 자리로 이동합니다. */
+function showReceipts(filter) {
+  elements.receiptSearch.value = "";
+  elements.receiptFilter.value = filter;
+  elements.receiptDetails.open = true;
+  renderReceipts();
+  elements.receiptDetails.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+/** 줄의 '연결 품번'을 누르면 그 줄의 품번별 입고 건수 · 금액을 보여 줍니다. */
+function openLineDetail(lineId) {
+  const line = currentLines().find((item) => item.id === Number(lineId));
+  if (!line) return;
+  const receipts = state.snapshot.receipts.filter((receipt) => receipt.lineId === line.id);
+  elements.lineDetailTitle.textContent = lineLabel(line);
+  elements.lineDetailSummary.textContent =
+    `연결 품번 ${line.items.length.toLocaleString("ko-KR")}개 · 입고 ${receipts.length.toLocaleString("ko-KR")}건 · `
+    + `매입금액 ${formatWon(line.purchaseAmount)} / 실행예산 ${formatWon(line.executionBudget)}`;
+  const rows = line.items.map((item) => {
+    const own = receipts.filter((receipt) => receipt.itemCode === item.itemCode);
+    return { ...item, count: own.length, amount: sumAmount(own) };
+  }).sort((a, b) => b.amount - a.amount || a.itemCode.localeCompare(b.itemCode));
+  elements.lineDetailItems.innerHTML = rows.length ? rows.map((row) => `
+    <tr class="${row.count ? "" : "muted-row"}">
+      <td><code>${escapeHtml(row.itemCode)}</code></td>
+      <td>${escapeHtml(row.itemName)}</td>
+      <td class="number-cell">${row.count.toLocaleString("ko-KR")}건</td>
+      <td class="number-cell">${formatWon(row.amount)}</td>
+    </tr>`).join("")
+    : '<tr><td class="empty-row" colspan="4">이 줄에 연결된 품번이 없습니다. 관리자에게 분류 · 품번 설정에서 연결을 요청하세요.</td></tr>';
+  elements.lineDetailReceiptsButton.onclick = () => {
+    elements.lineDetailDialog.close("done");
+    showReceipts(`line-${line.id}`);
+  };
+  openDialog(elements.lineDetailDialog, () => {});
+}
+
+/** 미분류 품번을 이 버전의 한 줄에 연결합니다(관리자는 분류 설정에도 함께 연결할 수 있음). */
+async function linkUnmappedItem(itemCode, itemName) {
+  const receipts = state.snapshot.receipts.filter((receipt) => receipt.itemCode === itemCode);
+  elements.linkItemSummary.textContent =
+    `${itemCode} · ${itemName} — 입고 ${receipts.length.toLocaleString("ko-KR")}건 · ${formatWon(sumAmount(receipts))}`;
+  elements.linkItemLine.innerHTML = groupExecutionLines(state.snapshot.lines).map((group) => `
+    <optgroup label="${escapeHtml(group.majorName)}">
+      ${group.lines.map((line) => `<option value="${line.id}">${escapeHtml([line.middleName, line.minorName].filter(Boolean).join(" › "))}</option>`).join("")}
+    </optgroup>`).join("");
+  elements.linkItemAlsoSettings.checked = state.permissions.canAdminister;
+  const confirmed = await new Promise((resolve) => {
+    openDialog(elements.linkItemDialog, (returnValue) => resolve(returnValue === "confirm"));
+    setTimeout(() => elements.linkItemLine.focus(), 0);
+  });
+  if (!confirmed) return;
+
+  const line = findLine(elements.linkItemLine.value);
+  const result = await busy(() => api(`/api/snapshots/${state.snapshot.id}/items`, {
+    method: "POST",
+    body: JSON.stringify({
+      lineId: line.id,
+      itemCode,
+      itemName,
+      alsoSettings: state.permissions.canAdminister && elements.linkItemAlsoSettings.checked,
+    }),
+  }));
+  state.snapshot = result.snapshot;
+  renderSnapshot();
+  const settingsNote = {
+    linked: " 분류 · 품번 설정에도 연결했습니다.",
+    already: " (분류 · 품번 설정에서는 이미 다른 곳에 연결돼 있어 그대로 두었습니다.)",
+    missing: " (분류 · 품번 설정에서 같은 분류를 찾지 못해 이 버전에만 연결했습니다.)",
+    skipped: "",
+  }[result.settings] || "";
+  showToast(`${itemCode}을(를) '${lineLabel(line)}' 줄에 연결했습니다.${settingsNote}`);
 }
 
 // ------------------------------------------------------------------ 집행서 동작
 
 async function saveStatement() {
+  if (!canEditSnapshot()) return;
   const lines = [...elements.statementRows.querySelectorAll(".statement-line")].map((row) => ({
     id: Number(row.dataset.lineId),
     executionBudget: parseBudgetInput(row.querySelector(".budget-input").value),
@@ -643,17 +905,25 @@ async function saveStatement() {
     if (error.code === "STALE") await ignoreFailure(loadSnapshots(state.snapshot.id));
     return;
   }
+  clearDraft(state.snapshot.id);
   setDirty(false);
   // 표를 통째로 다시 그리지 않고 금액 칸만 갱신해, 입력하던 자리를 잃지 않게 합니다.
   refreshDerivedCells();
   elements.snapshotDate.textContent = `저장 ${formatDateTime(state.snapshot.updatedAt)}`;
   if (activeElementId) document.getElementById(activeElementId)?.focus();
-  showToast(`${lines.length.toLocaleString("ko-KR")}개 중분류의 실행예산과 비고를 저장했습니다.`);
+  showToast(`${lines.length.toLocaleString("ko-KR")}개 항목의 실행예산과 비고를 저장했습니다.`);
 }
 
 async function createSnapshot(cloneCurrent = false) {
   if (!state.selectedProjectId) return showToast("먼저 프로젝트를 선택해 주세요.", true);
-  if (!await confirmDiscardChanges()) return;
+  if (cloneCurrent && state.dirty) {
+    const proceed = await askConfirm({
+      title: "저장하지 않은 입력은 복제되지 않습니다",
+      message: "복제는 마지막으로 저장한 값으로 만듭니다. 지금 입력하던 값은 이 버전에 그대로 남아 있습니다. 계속할까요?",
+      confirmLabel: "복제",
+    });
+    if (!proceed) return;
+  }
   const body = cloneCurrent && state.snapshot
     ? { cloneSnapshotId: state.snapshot.id }
     : { categorySetId: Number(elements.snapshotCategorySet.value) || null };
@@ -718,7 +988,6 @@ async function refreshContractAmount() {
 }
 
 async function importReceipts() {
-  if (state.dirty && !await confirmDiscardChanges()) return;
   const result = await busy(() => api(`/api/snapshots/${state.snapshot.id}/receipts/import`, {
     method: "POST",
     body: JSON.stringify({
@@ -728,12 +997,11 @@ async function importReceipts() {
     }),
   }));
   state.snapshot = result.snapshot;
-  state.receiptSkipNotice = result.skippedCount
-    ? `설정에 없는 품번 ${result.skippedCount.toLocaleString("ko-KR")}건은 제외했습니다${result.skippedItemCodes.length ? ` (${result.skippedItemCodes.slice(0, 5).join(", ")}${result.skippedItemCodes.length > 5 ? " 외" : ""})` : ""}.`
-    : "";
   setDirty(false);
   renderSnapshot();
-  showToast(`${result.importedCount.toLocaleString("ko-KR")}건의 입고금액을 반영했습니다.`);
+  showToast(result.unmappedCount
+    ? `입고 ${result.importedCount.toLocaleString("ko-KR")}건을 반영했습니다. 이 중 ${result.unmappedCount.toLocaleString("ko-KR")}건은 분류에 연결되지 않은 품번이라 '미분류'로 두었습니다.`
+    : `입고 ${result.importedCount.toLocaleString("ko-KR")}건을 반영했습니다.`);
 }
 
 async function clearReceipts() {
@@ -746,7 +1014,6 @@ async function clearReceipts() {
   if (!confirmed) return;
   const result = await busy(() => api(`/api/snapshots/${state.snapshot.id}/receipts`, { method: "DELETE" }));
   state.snapshot = result.snapshot;
-  state.receiptSkipNotice = "";
   renderSnapshot();
   showToast(`입고 내역 ${result.deletedCount.toLocaleString("ko-KR")}건을 삭제했습니다.`);
 }
@@ -851,7 +1118,7 @@ function renderPrintReport() {
       </tr></tfoot>
     </table>
     <div class="print-report-footer">
-      <span>연결 품번은 상세 코드 대신 분류별 건수로 표기했습니다. · ${confirmedNote}</span>
+      <span>연결 품번은 상세 코드 대신 분류별 건수로 표기했습니다. · ${confirmedNote}${snapshot.receiptSource?.fetchedAt ? ` · 입고 기준 ${formatDateTime(snapshot.receiptSource.fetchedAt)}` : ""}</span>
       <span>출력 ${formatDateTime(new Date())} · ${escapeHtml(state.user?.name || "")}</span>
     </div>`;
 }
@@ -913,7 +1180,6 @@ async function loadSelectedCategorySet() {
   state.selectedMajorId = null;
   state.selectedMiddleId = null;
   state.selectedMinorId = null;
-  elements.itemSearchResults.classList.add("hidden");
   renderSettings();
 }
 
@@ -1026,8 +1292,7 @@ function renderMajorList() {
     state.selectedMajorId = Number(button.closest(".master-row").dataset.majorId);
     state.selectedMiddleId = selectedMajor()?.middleCategories[0]?.id || null;
     state.selectedMinorId = null;
-    elements.itemSearchResults.classList.add("hidden");
-    renderSettings();
+      renderSettings();
   }));
   elements.majorList.querySelectorAll(".move-major").forEach((button) => button.addEventListener("click", () =>
     moveCategory("major", Number(button.closest(".master-row").dataset.majorId), button.dataset.direction)));
@@ -1053,8 +1318,7 @@ function renderMiddleList() {
   elements.middleList.querySelectorAll(".select-middle").forEach((button) => button.addEventListener("click", () => {
     state.selectedMiddleId = Number(button.closest(".master-row").dataset.middleId);
     state.selectedMinorId = null;
-    elements.itemSearchResults.classList.add("hidden");
-    renderSettings();
+      renderSettings();
   }));
   elements.middleList.querySelectorAll(".move-middle").forEach((button) => button.addEventListener("click", () =>
     moveCategory("middle", Number(button.closest(".master-row").dataset.middleId), button.dataset.direction)));
@@ -1081,8 +1345,7 @@ function renderMinorList() {
 
   elements.minorList.querySelectorAll(".select-minor").forEach((button) => button.addEventListener("click", () => {
     state.selectedMinorId = Number(button.closest(".master-row").dataset.minorId);
-    elements.itemSearchResults.classList.add("hidden");
-    renderSettings();
+      renderSettings();
   }));
   elements.minorList.querySelectorAll(".move-minor").forEach((button) => button.addEventListener("click", () =>
     moveCategory("minor", Number(button.closest(".master-row").dataset.minorId), button.dataset.direction)));
@@ -1257,44 +1520,190 @@ async function deleteMinor(row) {
   showToast("소분류를 삭제했습니다.");
 }
 
-/**
- * 품번 · 품명 · 규격의 일부로 검색합니다. 서버가 아마란스10 품목 목록을 잠시 보관해 두므로,
- * 방금 아마란스10에 등록한 품목은 '품목 목록 새로 받기'로 다시 받아야 보입니다.
- */
-async function searchItems({ refresh = false } = {}) {
-  const query = elements.itemSearchInput.value.trim();
-  const result = await busy(() => api(API.ITEM_SEARCH, {
-    method: "POST",
-    body: JSON.stringify({ query, refresh, categorySetId: state.selectedCategorySetId }),
-  }));
-  elements.itemSearchResults.classList.remove("hidden");
-  const summary = `
-    <div class="search-summary">
-      <span>${result.truncated
-        ? `${result.total.toLocaleString("ko-KR")}건 중 앞 ${result.items.length.toLocaleString("ko-KR")}건만 표시합니다. 검색어를 더 입력해 주세요.`
-        : `검색 결과 ${result.total.toLocaleString("ko-KR")}건`}</span>
-      <button type="button" class="link-button refresh-item-list">품목 목록 새로 받기</button>
-    </div>`;
-  elements.itemSearchResults.innerHTML = summary + (result.items.length
-    ? result.items.map((item) => `
-      <div class="search-result">
-        <code>${escapeHtml(item.itemCode)}</code>
-        <span>${escapeHtml(item.itemName)}${item.specification ? `<small class="item-spec">${escapeHtml(item.specification)}</small>` : ""}${item.mappedTo ? `<em class="already-mapped">${escapeHtml(item.mappedTo)}에 연결됨</em>` : ""}</span>
-        <button data-code="${escapeHtml(item.itemCode)}" data-name="${escapeHtml(item.itemName)}" ${item.mappedTo ? "disabled" : ""}>연결</button>
-      </div>`).join("")
-    : '<div class="settings-placeholder">검색 결과가 없습니다.<br>품번 · 품명 · 규격의 일부만 넣어도 찾습니다. 방금 아마란스10에 등록한 품목이면 \'품목 목록 새로 받기\'를 눌러 주세요.</div>');
-  elements.itemSearchResults.querySelector(".refresh-item-list").addEventListener("click", () => ignoreFailure(searchItems({ refresh: true })));
-  elements.itemSearchResults.querySelectorAll(".search-result button:not([disabled])").forEach((button) =>
-    button.addEventListener("click", () => addItem(button.dataset.code, button.dataset.name)));
+// ------------------------------------------------------------------ 품번 검색 창
+
+const ITEM_PICKER_SCOPE = Object.freeze({ ALL: "all", RECEIVED: "received" });
+const ITEM_PICKER_LIMIT = 2_000;
+const picker = { scope: ITEM_PICKER_SCOPE.ALL, items: [], total: 0, truncated: false, selected: new Set(), seq: 0, timer: null };
+
+function pickerMode() {
+  return document.querySelector('input[name="itemPickerMode"]:checked')?.value || "contains";
 }
 
-async function addItem(itemCode, itemName) {
+function findMiddleIdOfMinor(minorId) {
+  for (const major of state.categories) {
+    for (const middle of major.middleCategories) {
+      if (middle.minorCategories.some((minor) => minor.id === Number(minorId))) return middle.id;
+    }
+  }
+  return null;
+}
+
+/** 품목이 지금 연결하려는 곳에 이미 붙어 있는지(here), 다른 곳에 붙어 있는지(elsewhere), 비어 있는지(free). */
+function pickerItemState(item, target) {
+  if (!item.mappedTo) return "free";
+  const targetMiddleId = target.body.middleCategoryId ?? findMiddleIdOfMinor(target.body.minorCategoryId);
+  const same = Number(item.mappedMiddleId) === Number(targetMiddleId)
+    && Number(item.mappedMinorId || 0) === Number(target.body.minorCategoryId || 0);
+  return same ? "here" : "elsewhere";
+}
+
+function pickerSelectable(item, target) {
+  const status = pickerItemState(item, target);
+  return status === "free" || (status === "elsewhere" && elements.itemPickerMove.checked);
+}
+
+async function openItemPicker() {
   const target = itemMappingTarget();
-  if (!target) return showToast("품번을 연결할 중분류(소분류가 있으면 소분류)를 선택해 주세요.", true);
-  await busy(() => api(API.ITEM_MAPPINGS, { method: "POST", body: JSON.stringify({ ...target.body, itemCode, itemName }) }));
+  if (!target) return showToast("품번을 연결할 중분류(소분류가 있으면 소분류)를 먼저 골라 주세요.", true);
+  elements.itemPickerTarget.textContent = target.path.join(" › ");
+  picker.selected.clear();
+  setPickerScope(ITEM_PICKER_SCOPE.ALL, { search: false });
+  openDialog(elements.itemPickerDialog, () => clearTimeout(picker.timer));
+  setTimeout(() => {
+    elements.itemPickerQuery.focus();
+    elements.itemPickerQuery.select();
+  }, 0);
+  await Promise.all([runPickerSearch(), refreshReceivedCount()]);
+}
+
+function setPickerScope(scope, { search = true } = {}) {
+  picker.scope = scope;
+  elements.itemPickerDialog.querySelectorAll(".picker-tab").forEach((tab) => {
+    const active = tab.dataset.scope === scope;
+    tab.classList.toggle("active", active);
+    tab.setAttribute("aria-selected", String(active));
+  });
+  elements.itemPickerRefresh.classList.toggle("hidden", scope !== ITEM_PICKER_SCOPE.ALL);
+  picker.selected.clear();
+  if (search) ignoreFailure(runPickerSearch());
+}
+
+async function refreshReceivedCount() {
+  try {
+    const result = await api(API.ITEM_SEARCH, {
+      method: "POST",
+      body: JSON.stringify({ query: "", scope: ITEM_PICKER_SCOPE.RECEIVED, limit: 1, categorySetId: state.selectedCategorySetId }),
+    });
+    elements.itemPickerReceivedCount.textContent = result.total ? result.total.toLocaleString("ko-KR") : "";
+  } catch {
+    elements.itemPickerReceivedCount.textContent = "";
+  }
+}
+
+/** 검색합니다. 입력 중에 앞선 요청이 늦게 도착해도 마지막 검색 결과만 보여 줍니다. */
+async function runPickerSearch({ refresh = false } = {}) {
+  const sequence = ++picker.seq;
+  elements.itemPickerStatus.textContent = refresh ? "아마란스10에서 품목 목록을 다시 받는 중…" : "검색 중…";
+  try {
+    const result = await api(API.ITEM_SEARCH, {
+      method: "POST",
+      body: JSON.stringify({
+        query: elements.itemPickerQuery.value.trim(),
+        mode: pickerMode(),
+        scope: picker.scope,
+        refresh,
+        limit: ITEM_PICKER_LIMIT,
+        categorySetId: state.selectedCategorySetId,
+      }),
+    });
+    if (sequence !== picker.seq) return;
+    picker.items = result.items;
+    picker.total = result.total;
+    picker.truncated = result.truncated;
+    renderPicker();
+  } catch (error) {
+    if (sequence !== picker.seq) return;
+    picker.items = [];
+    picker.total = 0;
+    renderPicker();
+    elements.itemPickerStatus.textContent = error.message || "검색하지 못했습니다.";
+  }
+}
+
+function schedulePickerSearch() {
+  clearTimeout(picker.timer);
+  picker.timer = setTimeout(() => ignoreFailure(runPickerSearch()), 250);
+}
+
+function renderPicker() {
+  const target = itemMappingTarget();
+  if (!target) return;
+  const received = picker.scope === ITEM_PICKER_SCOPE.RECEIVED;
+  const emptyMessage = received
+    ? "입고됐지만 연결 안 된 품번이 없습니다. 집행서에서 매입금액을 불러오면 여기에 모입니다."
+    : "검색 결과가 없습니다. 품번 · 품명 · 규격의 일부만 넣어 보거나, 방금 등록한 품목이면 '품목 목록 새로 받기'를 눌러 주세요.";
+  elements.itemPickerRows.innerHTML = picker.items.length ? picker.items.map((item) => {
+    const status = pickerItemState(item, target);
+    const selectable = pickerSelectable(item, target);
+    const checked = selectable && picker.selected.has(item.itemCode);
+    const statusText = {
+      here: '<span class="pick-status here">이 분류에 연결됨</span>',
+      elsewhere: `<span class="pick-status elsewhere">${elements.itemPickerMove.checked ? "옮겨 옴 · " : ""}${escapeHtml(item.mappedTo)}</span>`,
+      free: '<span class="pick-status free">미연결</span>',
+    }[status];
+    const receiptText = received
+      ? `<small class="pick-receipt">입고 ${Number(item.receiptCount).toLocaleString("ko-KR")}건 · ${formatWon(item.receiptAmount)} · 최근 ${escapeHtml(item.lastReceiptDate || "-")}</small>`
+      : "";
+    return `
+      <tr class="pick-row${selectable ? "" : " disabled"}${checked ? " selected" : ""}" data-code="${escapeHtml(item.itemCode)}">
+        <td class="check-cell"><input type="checkbox" ${checked ? "checked" : ""} ${selectable ? "" : "disabled"} aria-label="${escapeHtml(item.itemCode)} 선택"></td>
+        <td><code>${escapeHtml(item.itemCode)}</code></td>
+        <td>${escapeHtml(item.itemName)}${receiptText}</td>
+        <td class="muted-cell">${escapeHtml(item.specification || "")}</td>
+        <td>${statusText}</td>
+      </tr>`;
+  }).join("") : `<tr><td class="empty-row" colspan="5">${emptyMessage}</td></tr>`;
+
+  elements.itemPickerRows.querySelectorAll(".pick-row:not(.disabled)").forEach((row) => {
+    row.addEventListener("click", (event) => {
+      const code = row.dataset.code;
+      if (picker.selected.has(code)) picker.selected.delete(code);
+      else picker.selected.add(code);
+      if (event.target.type !== "checkbox") row.querySelector("input").checked = picker.selected.has(code);
+      row.classList.toggle("selected", picker.selected.has(code));
+      updatePickerFooter();
+    });
+  });
+  updatePickerFooter();
+}
+
+function updatePickerFooter() {
+  const target = itemMappingTarget();
+  const selectable = target ? picker.items.filter((item) => pickerSelectable(item, target)) : [];
+  // 검색어를 바꿔 화면에서 사라진 선택은 지웁니다.
+  const visible = new Set(selectable.map((item) => item.itemCode));
+  for (const code of [...picker.selected]) if (!visible.has(code)) picker.selected.delete(code);
+  const count = picker.selected.size;
+  elements.itemPickerAll.checked = selectable.length > 0 && count === selectable.length;
+  elements.itemPickerAll.indeterminate = count > 0 && count < selectable.length;
+  elements.itemPickerAll.disabled = selectable.length === 0;
+  const shown = picker.truncated
+    ? `${picker.total.toLocaleString("ko-KR")}건 중 앞 ${picker.items.length.toLocaleString("ko-KR")}건 표시`
+    : `검색 결과 ${picker.total.toLocaleString("ko-KR")}건`;
+  elements.itemPickerStatus.textContent = `${shown} · 고를 수 있는 품번 ${selectable.length.toLocaleString("ko-KR")}건 · 선택 ${count.toLocaleString("ko-KR")}건`;
+  elements.itemPickerLink.disabled = count === 0;
+  elements.itemPickerLink.textContent = count ? `선택한 ${count.toLocaleString("ko-KR")}개 연결` : "선택한 품번 연결";
+}
+
+async function linkPickedItems() {
+  const target = itemMappingTarget();
+  if (!target || picker.selected.size === 0) return;
+  const items = picker.items
+    .filter((item) => picker.selected.has(item.itemCode))
+    .map((item) => ({ itemCode: item.itemCode, itemName: item.itemName }));
+  const result = await busy(() => api(`${API.ITEM_MAPPINGS}/bulk`, {
+    method: "POST",
+    body: JSON.stringify({ ...target.body, items, move: elements.itemPickerMove.checked }),
+  }));
+  picker.selected.clear();
   await refreshCategories();
-  await ignoreFailure(searchItems());
-  showToast(`${itemCode} 품번을 연결했습니다.`);
+  await Promise.all([runPickerSearch(), refreshReceivedCount()]);
+  const parts = [];
+  if (result.linked) parts.push(`새로 연결 ${result.linked}개`);
+  if (result.moved) parts.push(`옮겨 옴 ${result.moved}개`);
+  if (result.skipped) parts.push(`다른 곳에 연결돼 있어 건너뜀 ${result.skipped}개`);
+  showToast(parts.length ? `${target.path.join(" › ")}: ${parts.join(" · ")}` : "바뀐 연결이 없습니다.");
 }
 
 async function deleteItem(row) {
@@ -1553,33 +1962,820 @@ async function loadAuditLogs(offset = state.auditOffset) {
   elements.auditNextButton.disabled = last >= result.total;
 }
 
+// ------------------------------------------------------------------ 저장하지 않은 입력(임시 보관)
+
+/**
+ * 집행서마다 저장하지 않은 실행예산 · 비고를 이 브라우저에 보관합니다.
+ * 다른 탭이나 버전으로 옮기거나 새로 고침해도 다시 열면 이어서 입력할 수 있습니다.
+ * 서버 값과 다른 줄만 남겨, 그사이 다른 사람이 저장한 줄은 덮어쓰지 않습니다.
+ */
+function storageKey(kind) {
+  return `gi-${kind}:${state.user?.id || "anon"}`;
+}
+
+function readStorage(kind, fallback) {
+  try {
+    const raw = localStorage.getItem(storageKey(kind));
+    return raw ? JSON.parse(raw) : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function writeStorage(kind, value) {
+  try {
+    localStorage.setItem(storageKey(kind), JSON.stringify(value));
+  } catch {
+    // 저장소를 쓸 수 없는 환경(사생활 보호 창 등)이면 이 창에서만 유지합니다.
+  }
+}
+
+let draftTimer = null;
+
+function persistDrafts() {
+  clearTimeout(draftTimer);
+  writeStorage("drafts", state.drafts);
+}
+
+function captureDraft() {
+  if (!canEditSnapshot()) return;
+  const base = new Map(state.snapshot.lines.map((line) => [String(line.id), line]));
+  const lines = {};
+  for (const row of elements.statementRows.querySelectorAll(".statement-line")) {
+    const line = base.get(row.dataset.lineId);
+    const budget = parseBudgetInput(row.querySelector(".budget-input")?.value);
+    const remark = row.querySelector(".remark-input")?.value ?? "";
+    if (line && (budget !== Number(line.executionBudget) || remark !== String(line.remark ?? ""))) {
+      lines[row.dataset.lineId] = { budget, remark };
+    }
+  }
+  if (Object.keys(lines).length) {
+    state.drafts[state.snapshot.id] = { revision: state.snapshot.revision, savedAt: new Date().toISOString(), lines };
+  } else {
+    delete state.drafts[state.snapshot.id];
+  }
+  clearTimeout(draftTimer);
+  draftTimer = setTimeout(persistDrafts, 300);
+  renderTabs();
+}
+
+function clearDraft(snapshotId) {
+  if (!snapshotId || !state.drafts[snapshotId]) return;
+  delete state.drafts[snapshotId];
+  persistDrafts();
+  renderTabs();
+}
+
+/** 보관해 둔 입력을 표에 다시 채웁니다. 채운 줄이 있으면 true. */
+function applyDraft() {
+  const draft = state.drafts[state.snapshot?.id];
+  if (!draft || !canEditSnapshot()) return false;
+  let applied = 0;
+  for (const row of elements.statementRows.querySelectorAll(".statement-line")) {
+    const saved = draft.lines[row.dataset.lineId];
+    if (!saved) continue;
+    row.querySelector(".budget-input").value = Number(saved.budget).toLocaleString("ko-KR");
+    row.querySelector(".remark-input").value = saved.remark;
+    applied += 1;
+  }
+  if (!applied) return false;
+  setDirty(true);
+  refreshDerivedCells();
+  return true;
+}
+
+// ------------------------------------------------------------------ 탭
+
+const LIST_TAB_KEY = "screen:list";
+/** 너무 많이 열리면 왼쪽(먼저 연) 탭부터 닫습니다. 저장하지 않은 입력은 탭을 닫아도 남습니다. */
+const MAX_TABS = 15;
+const ADMIN_SCREENS = new Set(["settings", "amarance", "security", "users", "audit"]);
+/** '새 창으로 열기'로 연 창은 주소의 #tab=... 화면 하나만 열고, 탭 목록을 저장하지 않습니다. */
+const POPOUT = (() => {
+  const params = new URLSearchParams(window.location.hash.slice(1));
+  const key = params.get("tab");
+  return key ? { key, snapshotId: Number(params.get("snapshot")) || null } : null;
+})();
+/** 탭마다 보던 스크롤 위치. */
+const tabScroll = new Map();
+let tabDrag = null;
+let tabMenuItems = [];
+
+function persistTabs() {
+  if (POPOUT) return;
+  writeStorage("tabs", {
+    tabs: state.tabs.map(({ key, kind, screen, projectId, snapshotId, title }) => ({ key, kind, screen, projectId, snapshotId, title })),
+    active: state.activeTabKey,
+  });
+}
+
+function tabMeta(tab) {
+  if (tab.kind === "statement") return { icon: SCREEN_META.statement.icon, title: tab.title, full: tab.fullTitle || tab.title };
+  const meta = SCREEN_META[tab.screen];
+  return { icon: meta.icon, title: meta.title, full: meta.title };
+}
+
+function renderTabs() {
+  elements.tabBar.innerHTML = state.tabs.map((tab) => {
+    const active = tab.key === state.activeTabKey;
+    const dirty = tab.kind === "statement" && state.drafts[tab.snapshotId];
+    const meta = tabMeta(tab);
+    const hint = `${meta.full}\n(오른쪽 버튼: 탭 메뉴 · 가운데 버튼: 닫기 · 끌어서 순서 변경)`;
+    return `
+      <div class="tab${active ? " active" : ""}" role="tab" tabindex="0" aria-selected="${active}" draggable="true" data-key="${escapeHtml(tab.key)}" title="${escapeHtml(hint)}">
+        <span class="tab-icon" aria-hidden="true">${meta.icon}</span>
+        <span class="tab-label">${escapeHtml(meta.title)}</span>
+        ${dirty ? '<span class="tab-dirty" aria-label="저장하지 않은 입력 있음">●</span>' : ""}
+        ${tab.key === LIST_TAB_KEY ? "" : `<button type="button" class="tab-x" tabindex="-1" aria-label="${escapeHtml(meta.title)} 닫기">×</button>`}
+      </div>`;
+  }).join("");
+  revealActiveTab();
+}
+
+/** 탭이 넘쳐 가려졌으면 지금 탭이 보이게 가로로 옮깁니다. */
+function revealActiveTab() {
+  const bar = elements.tabBar;
+  const tab = bar.querySelector(".tab.active");
+  if (!tab) return;
+  if (tab.offsetLeft < bar.scrollLeft) bar.scrollLeft = tab.offsetLeft;
+  else if (tab.offsetLeft + tab.offsetWidth > bar.scrollLeft + bar.clientWidth) bar.scrollLeft = tab.offsetLeft + tab.offsetWidth - bar.clientWidth;
+}
+
+function ensureTab(tab) {
+  if (!state.tabs.some((item) => item.key === tab.key)) {
+    state.tabs.push(tab);
+    while (state.tabs.length > MAX_TABS) {
+      const oldest = state.tabs.findIndex((item) => item.key !== LIST_TAB_KEY && item.key !== tab.key && item.key !== state.activeTabKey);
+      if (oldest < 0) break;
+      tabScroll.delete(state.tabs[oldest].key);
+      state.tabs.splice(oldest, 1);
+    }
+  }
+  return state.tabs.find((item) => item.key === tab.key);
+}
+
+async function activateTab(key) {
+  const tab = state.tabs.find((item) => item.key === key);
+  if (!tab) return;
+  if (state.activeTabKey && state.activeTabKey !== key) tabScroll.set(state.activeTabKey, window.scrollY);
+  state.activeTabKey = key;
+  persistTabs();
+  renderTabs();
+  if (tab.kind === "screen") await setScreen(tab.screen);
+  else await showStatementTab(tab);
+  window.scrollTo(0, tabScroll.get(key) ?? 0);
+}
+
+function openScreenTab(screen) {
+  ensureTab({ key: `screen:${screen}`, kind: "screen", screen });
+  return activateTab(`screen:${screen}`);
+}
+
+/** 프로젝트 하나에 탭 하나를 씁니다. 이미 열려 있으면 그 탭으로 가서 원하는 버전을 보여 줍니다. */
+function openStatementTab(projectId, snapshotId = null) {
+  const project = state.projects.find((item) => item.id === Number(projectId));
+  const tab = ensureTab({ key: `project:${projectId}`, kind: "statement", projectId: Number(projectId), snapshotId: null, title: project?.code || "기성집행서" });
+  if (snapshotId) tab.snapshotId = Number(snapshotId);
+  return activateTab(tab.key);
+}
+
+async function showStatementTab(tab) {
+  await setScreen(SCREEN.STATEMENT);
+  state.selectedProjectId = tab.projectId;
+  renderProjects();
+  await busy(() => loadSnapshots(tab.snapshotId));
+}
+
+/** 지금 보는 집행서 버전을 탭 이름 · 저장 정보에 반영합니다. */
+function syncStatementTab() {
+  const tab = state.tabs.find((item) => item.key === state.activeTabKey);
+  if (!tab || tab.kind !== "statement") return;
+  const project = state.projects.find((item) => item.id === tab.projectId);
+  tab.snapshotId = state.snapshot?.id || null;
+  tab.title = `${project?.code || "기성집행서"}${state.snapshot ? ` v${state.snapshot.versionNo}` : ""}`;
+  tab.fullTitle = [project?.code, project?.name, state.snapshot ? `v${state.snapshot.versionNo} ${state.snapshot.title}` : ""].filter(Boolean).join(" · ");
+  persistTabs();
+  renderTabs();
+}
+
+/**
+ * 탭 여러 개를 닫습니다. 지금 보던 탭이 닫히면 오른쪽(없으면 왼쪽)에 남은 탭으로 갑니다.
+ * '기성집행서 목록' 탭은 닫지 않고, 저장하지 않은 입력도 지우지 않습니다(같은 집행서를 다시 열면 이어서 입력).
+ */
+async function closeTabs(keys) {
+  const remove = new Set(keys.filter((key) => key !== LIST_TAB_KEY));
+  if (!remove.size) return;
+  const index = state.tabs.findIndex((item) => item.key === state.activeTabKey);
+  const next = remove.has(state.activeTabKey)
+    ? state.tabs.slice(index + 1).find((item) => !remove.has(item.key)) || state.tabs.slice(0, index).reverse().find((item) => !remove.has(item.key))
+    : null;
+  state.tabs = state.tabs.filter((item) => !remove.has(item.key));
+  for (const key of remove) tabScroll.delete(key);
+  if (next) {
+    state.activeTabKey = null;
+    await activateTab(next.key);
+  } else {
+    persistTabs();
+    renderTabs();
+  }
+}
+
+/** 새로고침: 서버에서 다시 읽고 검색 조건 · 스크롤을 처음으로 돌립니다(저장하지 않은 집행서 입력은 남깁니다). */
+async function reloadTab(key) {
+  const tab = state.tabs.find((item) => item.key === key);
+  if (!tab) return;
+  if (tab.screen === SCREEN.LIST) {
+    elements.statementListSearch.value = "";
+    elements.statementListStatus.value = "";
+    elements.statementListLatest.checked = true;
+  }
+  if (tab.screen === SCREEN.PROJECTS) {
+    elements.projectListSearch.value = "";
+    elements.projectListStatus.value = "";
+  }
+  if (tab.screen === SCREEN.SECURITY || tab.screen === SCREEN.AMARANCE) state.integrationLoaded = false;
+  tabScroll.delete(key);
+  if (state.activeTabKey === key) state.activeTabKey = null;
+  await activateTab(key);
+}
+
+/** 그 화면만 새 창으로 엽니다. 새 창은 이 창의 탭 목록을 물려받지 않습니다. */
+function popOutTab(tab) {
+  const params = new URLSearchParams({ tab: tab.key });
+  if (tab.kind === "statement" && tab.snapshotId) params.set("snapshot", String(tab.snapshotId));
+  window.open(`${window.location.pathname}#${params}`, "_blank", "noopener");
+}
+
+/** 지난번에 열어 둔 탭을 되살립니다(권한이 없거나 사라진 프로젝트의 탭은 뺍니다). */
+function restoreTabs() {
+  const allowedScreen = (screen) => screen !== SCREEN.STATEMENT && SCREEN_META[screen] && (!ADMIN_SCREENS.has(screen) || state.permissions.canAdminister);
+  const knownProject = (projectId) => state.projects.some((project) => project.id === projectId);
+  state.tabs = [{ key: LIST_TAB_KEY, kind: "screen", screen: SCREEN.LIST }];
+  if (POPOUT) {
+    const [kind, value] = POPOUT.key.split(":");
+    if (kind === "project" && knownProject(Number(value))) return openStatementTab(Number(value), POPOUT.snapshotId);
+    if (kind === "screen" && allowedScreen(value) && value !== SCREEN.LIST) return openScreenTab(value);
+    return activateTab(LIST_TAB_KEY);
+  }
+  const saved = readStorage("tabs", null);
+  for (const tab of saved?.tabs || []) {
+    if (tab.key === LIST_TAB_KEY || state.tabs.length >= MAX_TABS) continue;
+    if ((tab.kind === "screen" && allowedScreen(tab.screen)) || (tab.kind === "statement" && knownProject(tab.projectId))) state.tabs.push({ ...tab });
+  }
+  const active = state.tabs.some((tab) => tab.key === saved?.active) ? saved.active : LIST_TAB_KEY;
+  return activateTab(active);
+}
+
+// 탭 우클릭 메뉴
+
+function openTabMenu(key, x, y) {
+  const index = state.tabs.findIndex((item) => item.key === key);
+  const tab = state.tabs[index];
+  if (!tab) return;
+  const closable = (item) => item.key !== LIST_TAB_KEY;
+  const keysOf = (items) => items.filter(closable).map((item) => item.key);
+  const left = keysOf(state.tabs.slice(0, index));
+  const right = keysOf(state.tabs.slice(index + 1));
+  const others = keysOf(state.tabs.filter((item) => item.key !== key));
+  const all = keysOf(state.tabs);
+  tabMenuItems = [
+    { label: "새로고침", hint: tab.kind === "statement" ? "입력은 유지" : "처음 상태로", run: () => reloadTab(key) },
+    { label: "새 창으로 열기", run: () => popOutTab(tab) },
+    "-",
+    { label: "닫기", hint: "Delete", run: () => closeTabs([key]), disabled: !closable(tab) },
+    { label: "다른 탭 모두 닫기", run: () => closeTabs(others), disabled: !others.length },
+    { label: "왼쪽 탭 모두 닫기", run: () => closeTabs(left), disabled: !left.length },
+    { label: "오른쪽 탭 모두 닫기", run: () => closeTabs(right), disabled: !right.length },
+    "-",
+    { label: "모든 탭 닫기", run: () => closeTabs(all), disabled: !all.length },
+  ];
+  const menu = elements.tabMenu;
+  menu.innerHTML = tabMenuItems.map((item, itemIndex) => item === "-"
+    ? '<div class="tab-menu-sep" role="separator"></div>'
+    : `<button type="button" role="menuitem" data-index="${itemIndex}"${item.disabled ? " disabled" : ""}>${escapeHtml(item.label)}${item.hint ? `<small>${escapeHtml(item.hint)}</small>` : ""}</button>`).join("");
+  menu.classList.remove("hidden");
+  menu.style.left = `${Math.max(8, Math.min(x, window.innerWidth - menu.offsetWidth - 8))}px`;
+  menu.style.top = `${Math.max(8, Math.min(y, window.innerHeight - menu.offsetHeight - 8))}px`;
+  menu.querySelector("button:not(:disabled)")?.focus();
+}
+
+function closeTabMenu() {
+  elements.tabMenu.classList.add("hidden");
+}
+
+elements.tabMenu.addEventListener("click", (event) => {
+  const button = event.target.closest("button[data-index]");
+  if (!button || button.disabled) return;
+  const item = tabMenuItems[Number(button.dataset.index)];
+  closeTabMenu();
+  ignoreFailure(Promise.resolve(item.run()));
+});
+elements.tabMenu.addEventListener("keydown", (event) => {
+  const buttons = [...elements.tabMenu.querySelectorAll("button:not(:disabled)")];
+  const at = buttons.indexOf(document.activeElement);
+  if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+    event.preventDefault();
+    buttons[(at + (event.key === "ArrowDown" ? 1 : buttons.length - 1)) % buttons.length]?.focus();
+  } else if (event.key === "Escape" || event.key === "Tab") {
+    event.preventDefault();
+    closeTabMenu();
+    elements.tabBar.querySelector(".tab.active")?.focus();
+  }
+});
+document.addEventListener("mousedown", (event) => {
+  if (!elements.tabMenu.classList.contains("hidden") && !elements.tabMenu.contains(event.target)) closeTabMenu();
+});
+// 창 크기가 실제로 바뀔 때만 닫습니다(화면 캡처 등으로 같은 크기의 resize 가 오기도 합니다).
+let tabMenuViewport = `${window.innerWidth}x${window.innerHeight}`;
+window.addEventListener("resize", () => {
+  const size = `${window.innerWidth}x${window.innerHeight}`;
+  if (size !== tabMenuViewport) closeTabMenu();
+  tabMenuViewport = size;
+});
+window.addEventListener("blur", closeTabMenu);
+
+// 탭 누르기 · 닫기 · 키보드 · 끌어서 순서 바꾸기
+
+const tabKeyOf = (event) => event.target.closest(".tab")?.dataset.key;
+
+elements.tabBar.addEventListener("click", (event) => {
+  const key = tabKeyOf(event);
+  if (!key) return;
+  if (event.target.closest(".tab-x")) ignoreFailure(closeTabs([key]));
+  else if (key !== state.activeTabKey) ignoreFailure(activateTab(key));
+});
+// 가운데 버튼으로 닫기(가운데 버튼의 자동 스크롤은 막습니다).
+elements.tabBar.addEventListener("mousedown", (event) => {
+  if (event.button === 1 && tabKeyOf(event)) event.preventDefault();
+});
+elements.tabBar.addEventListener("auxclick", (event) => {
+  const key = tabKeyOf(event);
+  if (event.button === 1 && key) ignoreFailure(closeTabs([key]));
+});
+elements.tabBar.addEventListener("contextmenu", (event) => {
+  const key = tabKeyOf(event);
+  if (!key) return;
+  event.preventDefault();
+  openTabMenu(key, event.clientX, event.clientY);
+});
+elements.tabBar.addEventListener("keydown", (event) => {
+  const key = tabKeyOf(event);
+  if (!key) return;
+  const element = event.target.closest(".tab");
+  if (event.key === "Enter" && key !== state.activeTabKey) ignoreFailure(activateTab(key));
+  else if (event.key === "Delete") ignoreFailure(closeTabs([key]));
+  else if (event.key === "ArrowRight" || event.key === "ArrowLeft") {
+    event.preventDefault();
+    (event.key === "ArrowRight" ? element.nextElementSibling : element.previousElementSibling)?.focus();
+  } else if (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10")) {
+    event.preventDefault();
+    const rect = element.getBoundingClientRect();
+    openTabMenu(key, rect.left, rect.bottom + 2);
+  }
+});
+// 탭이 넘치면 마우스 휠로 가로로 넘깁니다.
+elements.tabBar.addEventListener("wheel", (event) => {
+  const bar = elements.tabBar;
+  if (bar.scrollWidth <= bar.clientWidth || Math.abs(event.deltaY) <= Math.abs(event.deltaX)) return;
+  event.preventDefault();
+  bar.scrollLeft += event.deltaY;
+}, { passive: false });
+
+function clearDropMarks() {
+  elements.tabBar.querySelectorAll(".drop-before, .drop-after").forEach((element) => element.classList.remove("drop-before", "drop-after"));
+}
+
+elements.tabBar.addEventListener("dragstart", (event) => {
+  const element = event.target.closest(".tab");
+  if (!element) return;
+  tabDrag = element.dataset.key;
+  element.classList.add("dragging");
+  event.dataTransfer.effectAllowed = "move";
+  event.dataTransfer.setData("text/plain", element.querySelector(".tab-label").textContent);
+});
+elements.tabBar.addEventListener("dragover", (event) => {
+  const element = event.target.closest(".tab");
+  if (!tabDrag || !element) return;
+  event.preventDefault();
+  clearDropMarks();
+  if (element.dataset.key === tabDrag) return;
+  const rect = element.getBoundingClientRect();
+  element.classList.add(event.clientX > rect.left + rect.width / 2 ? "drop-after" : "drop-before");
+});
+elements.tabBar.addEventListener("drop", (event) => {
+  const element = event.target.closest(".tab");
+  if (!tabDrag || !element) return;
+  event.preventDefault();
+  const target = element.dataset.key;
+  if (target !== tabDrag) {
+    const rect = element.getBoundingClientRect();
+    const after = event.clientX > rect.left + rect.width / 2;
+    const moving = state.tabs.find((item) => item.key === tabDrag);
+    const rest = state.tabs.filter((item) => item.key !== tabDrag);
+    const at = rest.findIndex((item) => item.key === target) + (after ? 1 : 0);
+    state.tabs = [...rest.slice(0, at), moving, ...rest.slice(at)];
+    persistTabs();
+  }
+  tabDrag = null;
+  renderTabs();
+});
+elements.tabBar.addEventListener("dragend", () => {
+  tabDrag = null;
+  clearDropMarks();
+  elements.tabBar.querySelector(".dragging")?.classList.remove("dragging");
+});
+
+// ------------------------------------------------------------------ 기성집행서 목록
+
+async function loadStatementList() {
+  state.statementList = await api(API.SNAPSHOTS);
+  renderStatementList();
+}
+
+function renderStatementList() {
+  const keyword = elements.statementListSearch.value.trim().toLowerCase();
+  const status = elements.statementListStatus.value;
+  const latestOnly = elements.statementListLatest.checked;
+  const rows = state.statementList.filter((item) => {
+    if (latestOnly && !item.isLatest) return false;
+    if (status && item.status !== status) return false;
+    if (!keyword) return true;
+    return [item.projectCode, item.projectName, item.title].some((value) => String(value || "").toLowerCase().includes(keyword));
+  });
+  elements.statementListCount.textContent = `${rows.length.toLocaleString("ko-KR")}건`;
+  elements.statementListRows.innerHTML = rows.length ? rows.map((item) => {
+    const isDraft = item.status === SNAPSHOT_STATUS.DRAFT;
+    const hasLocalDraft = Boolean(state.drafts[item.id]);
+    return `
+      <tr class="list-row" tabindex="0" data-project-id="${item.projectId}" data-snapshot-id="${item.id}">
+        <td><strong class="list-code">${escapeHtml(item.projectCode)}</strong><small>${escapeHtml(item.projectName)}${item.isArchived ? " · 보관" : ""}</small></td>
+        <td>v${item.versionNo} · ${escapeHtml(item.title)}${item.isLatest ? "" : "<small>이전 버전</small>"}</td>
+        <td><span class="badge ${isDraft ? "draft" : "confirmed"}">${REPORT_STATUS_LABEL[item.status]}</span>${hasLocalDraft ? '<small class="local-draft">● 저장 안 된 입력</small>' : ""}</td>
+        <td class="number-cell">${formatWon(item.contractAmount)}</td>
+        <td class="number-cell">${formatWon(item.executionBudget)}</td>
+        <td class="number-cell">${formatWon(item.purchaseAmount)}${item.unmappedCount ? `<small class="list-unmapped">미분류 ${item.unmappedCount.toLocaleString("ko-KR")}건</small>` : ""}</td>
+        <td class="number-cell ${item.profitAmount < 0 ? "negative" : ""}">${formatPercent(item.profitRate)}</td>
+        <td>${progressMarkup(item.executionRate)}</td>
+        <td class="muted-cell">${item.receiptsFetchedAt ? formatDateTime(item.receiptsFetchedAt) : "불러오기 전"}</td>
+        <td class="muted-cell">${formatDateTime(item.updatedAt)}<small>${escapeHtml(item.confirmedBy || item.createdBy || "")}</small></td>
+      </tr>`;
+  }).join("") : `<tr><td class="empty-row" colspan="10">${state.statementList.length
+    ? "조건에 맞는 기성집행서가 없습니다."
+    : "아직 등록된 기성집행서가 없습니다. ＋ 새 기성집행서로 시작하세요."}</td></tr>`;
+  applyProgressWidths(elements.statementListRows);
+  elements.statementListRows.querySelectorAll(".list-row").forEach((row) => {
+    const open = () => ignoreFailure(openStatementTab(row.dataset.projectId, row.dataset.snapshotId));
+    row.addEventListener("click", open);
+    row.addEventListener("keydown", (event) => { if (event.key === "Enter") open(); });
+  });
+}
+
+// ------------------------------------------------------------------ 새 기성집행서
+
+function newStatementMethod() {
+  return document.querySelector('input[name="newStatementMethod"]:checked')?.value || "settings";
+}
+
+/** 검색어를 띄어쓰기로 나눈 낱말들. 모든 낱말이 코드나 이름에 들어 있어야 찾은 것으로 봅니다. */
+function searchTokens(text) {
+  return text.trim().toLowerCase().split(/\s+/).filter(Boolean);
+}
+
+/** 찾은 낱말을 <mark> 로 칠합니다(그 밖의 글자는 그대로 이스케이프). */
+function highlight(text, tokens) {
+  const value = String(text ?? "");
+  const lower = value.toLowerCase();
+  const marks = new Array(value.length).fill(false);
+  for (const token of tokens) {
+    for (let at = lower.indexOf(token); at >= 0; at = lower.indexOf(token, at + 1)) marks.fill(true, at, at + token.length);
+  }
+  let html = "";
+  for (let index = 0; index < value.length;) {
+    let end = index;
+    while (end < value.length && marks[end] === marks[index]) end += 1;
+    const part = escapeHtml(value.slice(index, end));
+    html += marks[index] ? `<mark>${part}</mark>` : part;
+    index = end;
+  }
+  return html;
+}
+
+/** 프로젝트마다 최신 집행서 버전(목록에서 계산). */
+function latestStatementByProject() {
+  const latest = new Map();
+  for (const item of state.statementList) {
+    const known = latest.get(item.projectId);
+    if (!known || item.versionNo > known.versionNo) latest.set(item.projectId, item);
+  }
+  return latest;
+}
+
+function newStatementCandidates() {
+  const tokens = searchTokens(elements.newStatementSearch.value);
+  const filter = document.querySelector('input[name="newStatementFilter"]:checked')?.value || "";
+  const latest = latestStatementByProject();
+  const rank = (project) => {
+    // 코드가 검색어로 시작하면 맨 위, 진행 중인 프로젝트를 완료보다 위에.
+    const code = project.code.toLowerCase();
+    return (tokens.length && tokens.every((token) => code.includes(token)) ? 0 : 2)
+      - (tokens[0] && code.startsWith(tokens[0]) ? 1 : 0)
+      + (project.status === "ACTIVE" ? 0 : 4);
+  };
+  const projects = state.projects.filter((project) => {
+    if (project.isArchived) return false;
+    if (filter === "EMPTY" && latest.has(project.id)) return false;
+    if (filter && filter !== "EMPTY" && project.status !== filter) return false;
+    const haystack = `${project.code} ${project.name}`.toLowerCase();
+    return tokens.every((token) => haystack.includes(token));
+  });
+  projects.sort((a, b) => rank(a) - rank(b) || b.code.localeCompare(a.code));
+  return { projects, tokens, latest };
+}
+
+function renderNewStatementProjects(preferredId = null) {
+  const previous = preferredId || Number(elements.newStatementProject.value) || null;
+  const { projects, tokens, latest } = newStatementCandidates();
+  elements.newStatementCount.textContent = `${projects.length.toLocaleString("ko-KR")}건`;
+  elements.newStatementList.innerHTML = projects.length ? projects.map((project) => {
+    const statement = latest.get(project.id);
+    const version = statement
+      ? `<span class="chip ${statement.status === SNAPSHOT_STATUS.CONFIRMED ? "chip-green" : "chip-amber"}">v${statement.versionNo} ${REPORT_STATUS_LABEL[statement.status]}</span>`
+      : '<span class="chip">집행서 없음</span>';
+    return `
+      <div class="project-option" role="option" id="project-option-${project.id}" data-project-id="${project.id}" aria-selected="false">
+        <span class="project-option-main">
+          <strong>${highlight(project.code, tokens)}</strong>
+          <span>${highlight(project.name, tokens)}</span>
+        </span>
+        <span class="project-option-meta">
+          <span class="project-option-amount">${formatWon(project.contractAmount)}</span>
+          <span class="chip ${project.status === "ACTIVE" ? "chip-blue" : ""}">${project.status === "ACTIVE" ? "진행" : "완료"}</span>
+          ${version}
+        </span>
+        <span class="project-option-check" aria-hidden="true">✓</span>
+      </div>`;
+  }).join("") : `
+      <div class="project-options-empty">
+        <strong>찾는 프로젝트가 없습니다.</strong>
+        <span>검색어나 걸러 보기를 바꿔 보세요. 아마란스10에 새로 생긴 프로젝트라면 '프로젝트' 화면에서 동기화하세요.</span>
+      </div>`;
+  const keep = projects.find((project) => project.id === previous) || projects[0];
+  return selectNewStatementProject(keep?.id || null);
+}
+
+/** 프로젝트 하나를 고르고(목록에 표시), 복제할 버전 목록을 불러옵니다. */
+function selectNewStatementProject(projectId, { reveal = true } = {}) {
+  elements.newStatementProject.value = projectId ? String(projectId) : "";
+  let selected = null;
+  for (const option of elements.newStatementList.querySelectorAll(".project-option")) {
+    const on = Number(option.dataset.projectId) === Number(projectId);
+    option.classList.toggle("selected", on);
+    option.setAttribute("aria-selected", String(on));
+    if (on) selected = option;
+  }
+  elements.newStatementSearch.setAttribute("aria-activedescendant", selected?.id || "");
+  if (selected && reveal) selected.scrollIntoView({ block: "nearest" });
+  return loadNewStatementVersions();
+}
+
+function moveNewStatementSelection(step) {
+  const options = [...elements.newStatementList.querySelectorAll(".project-option")];
+  if (!options.length) return;
+  const at = options.findIndex((option) => option.classList.contains("selected"));
+  const next = options[Math.min(options.length - 1, Math.max(0, at + step))];
+  ignoreFailure(selectNewStatementProject(Number(next.dataset.projectId)));
+}
+
+let newStatementVersionSeq = 0;
+
+async function loadNewStatementVersions() {
+  const projectId = Number(elements.newStatementProject.value);
+  const seq = ++newStatementVersionSeq;
+  const versions = projectId ? await api(`/api/projects/${projectId}/snapshots`) : [];
+  // 목록을 빠르게 오르내리면 늦게 온 이전 응답이 덮어쓰지 않게 합니다.
+  if (seq !== newStatementVersionSeq) return;
+  elements.newStatementClone.innerHTML = versions.map((version) => `
+    <option value="${version.id}">v${version.versionNo} · ${escapeHtml(version.title)}${version.status === SNAPSHOT_STATUS.CONFIRMED ? " (확정)" : ""}</option>`).join("");
+  elements.newStatementCloneOption.disabled = versions.length === 0;
+  elements.newStatementCloneHint.textContent = !versions.length
+    ? "이 프로젝트에는 아직 복제할 버전이 없습니다."
+    : versions.length === 1
+      ? `v${versions[0].versionNo} 의 실행예산 · 비고를 그대로 가져옵니다.`
+      : `버전 ${versions.length}개 중 하나를 골라 실행예산 · 비고를 그대로 가져옵니다.`;
+  if (!versions.length && newStatementMethod() === "clone") {
+    document.querySelector('input[name="newStatementMethod"][value="settings"]').checked = true;
+  }
+  updateNewStatementFields();
+}
+
+function updateNewStatementFields() {
+  const clone = newStatementMethod() === "clone";
+  elements.newStatementCloneField.classList.toggle("hidden", !clone);
+  elements.newStatementSetField.classList.toggle("hidden", clone);
+}
+
+async function openNewStatementDialog(projectId = null) {
+  if (!state.statementList.length) await ignoreFailure(loadStatementList());
+  elements.newStatementSearch.value = "";
+  document.querySelector('input[name="newStatementFilter"][value=""]').checked = true;
+  elements.newStatementError.hidden = true;
+  elements.newStatementSet.innerHTML = state.categorySets.map((set) => `
+    <option value="${set.id}">${escapeHtml(categorySetLabel(set))}${set.isCurrent ? " (사용 중)" : ""}</option>`).join("");
+  const current = state.categorySets.find((set) => set.isCurrent);
+  if (current) elements.newStatementSet.value = String(current.id);
+  document.querySelector('input[name="newStatementMethod"][value="settings"]').checked = true;
+  await renderNewStatementProjects(projectId);
+  openDialog(elements.newStatementDialog, () => {});
+  setTimeout(() => elements.newStatementSearch.focus(), 0);
+}
+
+async function submitNewStatement() {
+  const projectId = Number(elements.newStatementProject.value);
+  if (!projectId) {
+    elements.newStatementError.textContent = "프로젝트를 골라 주세요.";
+    elements.newStatementError.hidden = false;
+    return;
+  }
+  const body = newStatementMethod() === "clone"
+    ? { cloneSnapshotId: Number(elements.newStatementClone.value) }
+    : { categorySetId: Number(elements.newStatementSet.value) || null };
+  const created = await busy(() => api(`/api/projects/${projectId}/snapshots`, { method: "POST", body: JSON.stringify(body) }));
+  elements.newStatementDialog.close("done");
+  await ignoreFailure(loadStatementList());
+  await openStatementTab(projectId, created.id);
+  showToast(`v${created.versionNo} 기성집행서를 만들었습니다. 매입금액을 불러오고 실행예산을 입력하세요.`);
+}
+
+// ------------------------------------------------------------------ 프로젝트
+
+async function loadProjectList() {
+  const result = await api(API.PROJECTS);
+  state.projectList = result.projects;
+  state.projectSync = result.sync;
+  renderProjectList();
+  renderProjectSync();
+}
+
+function renderProjectList() {
+  const keyword = elements.projectListSearch.value.trim().toLowerCase();
+  const filter = elements.projectListStatus.value;
+  const rows = state.projectList.filter((project) => {
+    if (filter === "ARCHIVED" && !project.isArchived) return false;
+    if (filter && filter !== "ARCHIVED" && (project.status !== filter || project.isArchived)) return false;
+    return !keyword || project.code.toLowerCase().includes(keyword) || project.name.toLowerCase().includes(keyword);
+  });
+  elements.projectListCount.textContent = `${rows.length.toLocaleString("ko-KR")}건`;
+  elements.projectListRows.innerHTML = rows.length ? rows.map((project) => {
+    const statusText = project.isArchived ? "보관" : project.status === "ACTIVE" ? "진행" : "완료";
+    const statement = project.snapshotCount
+      ? `${project.snapshotCount.toLocaleString("ko-KR")}개 · 최신 v${project.latestVersionNo} ${REPORT_STATUS_LABEL[project.latestStatus]}`
+      : '<span class="muted-cell">없음</span>';
+    const action = project.snapshotCount
+      ? `<button class="table-action open-project" data-project-id="${project.id}">집행서 열기</button>`
+      : (state.permissions.canEdit && !project.isArchived
+        ? `<button class="table-action new-project-statement" data-project-id="${project.id}">새로 만들기</button>`
+        : "");
+    return `
+      <tr>
+        <td><strong class="list-code">${escapeHtml(project.code)}</strong></td>
+        <td>${escapeHtml(project.name)}</td>
+        <td class="number-cell">${formatWon(project.contractAmount)}</td>
+        <td><span class="pill ${project.isArchived ? "off" : project.status === "ACTIVE" ? "on" : ""}"><i aria-hidden="true"></i>${statusText}</span></td>
+        <td>${statement}</td>
+        <td class="muted-cell">${formatDateTime(project.syncedAt)}</td>
+        <td class="actions-column">${action}</td>
+      </tr>`;
+  }).join("") : `<tr><td class="empty-row" colspan="7">${state.projectList.length
+    ? "조건에 맞는 프로젝트가 없습니다."
+    : "프로젝트가 없습니다. '지금 동기화'로 아마란스10에서 가져오세요."}</td></tr>`;
+  elements.projectListRows.querySelectorAll(".open-project").forEach((button) =>
+    button.addEventListener("click", () => ignoreFailure(openStatementTab(button.dataset.projectId))));
+  elements.projectListRows.querySelectorAll(".new-project-statement").forEach((button) =>
+    button.addEventListener("click", () => ignoreFailure(openNewStatementDialog(Number(button.dataset.projectId)))));
+}
+
+function renderProjectSync() {
+  const sync = state.projectSync;
+  if (!sync) return;
+  const last = sync.last;
+  const lastText = last
+    ? `마지막 ${last.trigger === "auto" ? "자동" : "수동"} 동기화 ${formatDateTime(last.at)} · `
+      + (last.ok
+        ? `받은 프로젝트 ${last.summary?.received ?? 0}건 (추가 ${last.summary?.created ?? 0} · 갱신 ${last.summary?.updated ?? 0} · 보관 ${last.summary?.archived ?? 0})`
+        : `실패: ${last.error}`)
+    : "아직 동기화한 기록이 없습니다.";
+  const schedule = sync.schedule;
+  const nextText = schedule.enabled
+    ? `자동 동기화: ${schedule.mode === "interval" ? `${schedule.intervalHours}시간마다` : `매일 ${schedule.time}`}${sync.nextAt ? ` · 다음 예정 ${formatDateTime(sync.nextAt)}` : ""}`
+    : "자동 동기화 꺼짐";
+  elements.projectSyncStatus.textContent = `${lastText}\n${nextText}`;
+  elements.projectSyncStatus.classList.toggle("failed", Boolean(last && !last.ok));
+  elements.syncEnabled.checked = schedule.enabled;
+  elements.syncMode.value = schedule.mode;
+  elements.syncTime.value = schedule.time;
+  elements.syncInterval.value = String(schedule.intervalHours);
+  updateSyncFields();
+}
+
+function updateSyncFields() {
+  const interval = elements.syncMode.value === "interval";
+  elements.syncTimeField.classList.toggle("hidden", interval);
+  elements.syncIntervalField.classList.toggle("hidden", !interval);
+}
+
+async function syncProjectsNow() {
+  const result = await busy(() => api(API.PROJECT_SYNC, { method: "POST", body: "{}" }));
+  state.projects = result.projects;
+  state.projectSync = result.sync;
+  renderProjects();
+  await ignoreFailure(loadProjectList());
+  if (state.statementList.length) await ignoreFailure(loadStatementList());
+  reportSyncResult(result.summary);
+}
+
+async function saveProjectSyncSchedule() {
+  state.projectSync = await busy(() => api(API.PROJECT_SYNC_SCHEDULE, {
+    method: "PUT",
+    body: JSON.stringify({
+      enabled: elements.syncEnabled.checked,
+      mode: elements.syncMode.value,
+      time: elements.syncTime.value,
+      intervalHours: Number(elements.syncInterval.value),
+    }),
+  }));
+  renderProjectSync();
+  showToast(state.projectSync.schedule.enabled ? "자동 동기화를 저장했습니다." : "자동 동기화를 껐습니다.");
+}
+
 // ------------------------------------------------------------------ 이벤트 연결
 
 document.querySelectorAll(".nav-item").forEach((button) =>
-  button.addEventListener("click", () => ignoreFailure(setScreen(button.dataset.screen))));
+  button.addEventListener("click", () => ignoreFailure(openScreenTab(button.dataset.screen))));
+elements.statementListSearch.addEventListener("input", () => renderStatementList());
+elements.statementListStatus.addEventListener("change", () => renderStatementList());
+elements.statementListLatest.addEventListener("change", () => renderStatementList());
+elements.newStatementButton.addEventListener("click", () => ignoreFailure(openNewStatementDialog()));
+elements.newStatementSearch.addEventListener("input", () => ignoreFailure(renderNewStatementProjects()));
+document.querySelectorAll('input[name="newStatementFilter"]').forEach((radio) =>
+  radio.addEventListener("change", () => ignoreFailure(renderNewStatementProjects())));
+elements.newStatementList.addEventListener("click", (event) => {
+  const option = event.target.closest(".project-option");
+  if (option) ignoreFailure(selectNewStatementProject(Number(option.dataset.projectId), { reveal: false }));
+});
+// 두 번 누르면 바로 만듭니다.
+elements.newStatementList.addEventListener("dblclick", (event) => {
+  if (event.target.closest(".project-option")) elements.newStatementForm.requestSubmit();
+});
+// 검색칸에서 ↑ ↓ 로 고르고, Enter 는 '만들고 열기' 로 넘어갑니다(실수로 바로 만들어지지 않게).
+elements.newStatementSearch.addEventListener("keydown", (event) => {
+  if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+    event.preventDefault();
+    moveNewStatementSelection(event.key === "ArrowDown" ? 1 : -1);
+  } else if (event.key === "Enter") {
+    event.preventDefault();
+    if (elements.newStatementProject.value) elements.newStatementForm.querySelector('button[value="confirm"]').focus();
+  }
+});
+document.querySelectorAll('input[name="newStatementMethod"]').forEach((radio) => radio.addEventListener("change", updateNewStatementFields));
+elements.newStatementForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  ignoreFailure(submitNewStatement());
+});
+elements.projectListSearch.addEventListener("input", () => renderProjectList());
+elements.projectListStatus.addEventListener("change", () => renderProjectList());
+elements.syncMode.addEventListener("change", updateSyncFields);
+elements.projectSyncForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  ignoreFailure(saveProjectSyncSchedule());
+});
 
 elements.projectFilter.addEventListener("input", () => renderProjects());
+elements.receiptSearch.addEventListener("input", () => renderReceipts());
+elements.saveBarButton.addEventListener("click", () => ignoreFailure(saveStatement()));
+elements.discardChangesButton.addEventListener("click", async () => {
+  const discard = await askConfirm({
+    title: "입력한 내용 되돌리기",
+    message: "저장하지 않은 실행예산과 비고를 버리고 마지막으로 저장한 값으로 되돌립니다.",
+    confirmLabel: "되돌리기",
+    danger: true,
+  });
+  if (!discard) return;
+  clearDraft(state.snapshot.id);
+  setDirty(false);
+  renderStatementRows();
+  renderSummary();
+});
+elements.receiptFilter.addEventListener("change", () => renderReceipts());
+elements.showUnmappedButton.addEventListener("click", () => showReceipts(RECEIPT_FILTER.UNMAPPED));
 elements.projectSelect.addEventListener("change", async () => {
   const nextId = Number(elements.projectSelect.value);
-  if (!await confirmDiscardChanges()) {
-    elements.projectSelect.value = String(state.selectedProjectId || "");
-    return;
-  }
   state.selectedProjectId = nextId;
-  state.receiptSkipNotice = "";
   renderProjects();
   await ignoreFailure(busy(() => loadSnapshots()));
 });
 elements.snapshotSelect.addEventListener("change", async () => {
   const nextId = elements.snapshotSelect.value;
-  if (!await confirmDiscardChanges()) {
-    elements.snapshotSelect.value = String(state.snapshot?.id || "");
-    return;
-  }
-  state.receiptSkipNotice = "";
-  state.snapshot = await busy(() => api(`/api/snapshots/${nextId}`));
-  setDirty(false);
-  renderSnapshot();
+  await ignoreFailure(busy(() => loadSnapshots(nextId)));
 });
 
 elements.newSnapshotButton.addEventListener("click", () => ignoreFailure(createSnapshot(false)));
@@ -1590,6 +2786,7 @@ elements.deleteSnapshotButton.addEventListener("click", () => ignoreFailure(dele
 elements.toggleSnapshotStatusButton.addEventListener("click", () => ignoreFailure(confirmSnapshot()));
 elements.refreshContractButton.addEventListener("click", () => ignoreFailure(refreshContractAmount()));
 elements.importReceiptsButton.addEventListener("click", () => ignoreFailure(importReceipts()));
+elements.refreshReceiptsButton.addEventListener("click", () => ignoreFailure(refreshReceipts()));
 elements.clearReceiptsButton.addEventListener("click", () => ignoreFailure(clearReceipts()));
 elements.saveStatementButton.addEventListener("click", () => ignoreFailure(saveStatement()));
 
@@ -1602,16 +2799,7 @@ elements.exportExcelButton.addEventListener("click", () => {
   if (state.dirty) showToast("저장하지 않은 변경은 파일에 포함되지 않습니다.", true);
   window.location.assign(`/api/snapshots/${state.snapshot.id}/export.xlsx`);
 });
-elements.syncProjectsButton.addEventListener("click", async () => {
-  if (!await confirmDiscardChanges()) return;
-  await ignoreFailure(busy(async () => {
-    const result = await api(API.PROJECT_SYNC, { method: "POST", body: "{}" });
-    state.projects = result.projects;
-    renderProjects();
-    await loadSnapshots();
-    reportSyncResult(result.summary);
-  }));
-});
+elements.syncProjectsButton.addEventListener("click", () => ignoreFailure(syncProjectsNow()));
 
 /** 동기화 결과를 건수로 알려, 0건을 성공으로 오해하지 않게 합니다. */
 function reportSyncResult(summary) {
@@ -1686,8 +2874,7 @@ elements.resetDialogForm.addEventListener("submit", async (event) => {
     state.snapshots = [];
     state.snapshot = null;
     state.selectedProjectId = state.projects[0]?.id || null;
-    state.receiptSkipNotice = "";
-    setDirty(false);
+      setDirty(false);
     renderProjects();
     renderSnapshot();
     await showNotice({
@@ -1706,13 +2893,36 @@ elements.resetDialogForm.addEventListener("submit", async (event) => {
 elements.addMajorButton.addEventListener("click", () => ignoreFailure(addMajor()));
 elements.addMiddleButton.addEventListener("click", () => ignoreFailure(addMiddle()));
 elements.addMinorButton.addEventListener("click", () => ignoreFailure(addMinor()));
-elements.itemSearchButton.addEventListener("click", () => ignoreFailure(searchItems()));
-elements.itemSearchInput.addEventListener("keydown", (event) => {
-  if (event.key === "Enter" && !event.isComposing) {
-    event.preventDefault();
-    ignoreFailure(searchItems());
-  }
+elements.openItemPickerButton.addEventListener("click", () => ignoreFailure(openItemPicker()));
+elements.itemPickerQuery.addEventListener("input", schedulePickerSearch);
+elements.itemPickerQuery.addEventListener("keydown", (event) => {
+  // 검색 창 안의 Enter 가 대화상자를 닫지 않고 바로 검색하도록 합니다.
+  if (event.key !== "Enter" || event.isComposing) return;
+  event.preventDefault();
+  clearTimeout(picker.timer);
+  ignoreFailure(runPickerSearch());
 });
+document.querySelectorAll('input[name="itemPickerMode"]').forEach((radio) => radio.addEventListener("change", () => {
+  elements.itemPickerQuery.placeholder = pickerMode() === "prefix"
+    ? "품번 앞자리 (예: ET-, A-A0)"
+    : "품번 · 품명 · 규격 일부 (띄어 쓰면 모두 포함)";
+  elements.itemPickerQuery.focus();
+  ignoreFailure(runPickerSearch());
+}));
+elements.itemPickerDialog.querySelectorAll(".picker-tab").forEach((tab) =>
+  tab.addEventListener("click", () => setPickerScope(tab.dataset.scope)));
+elements.itemPickerMove.addEventListener("change", () => renderPicker());
+elements.itemPickerRefresh.addEventListener("click", () => ignoreFailure(runPickerSearch({ refresh: true })));
+elements.itemPickerAll.addEventListener("change", () => {
+  const target = itemMappingTarget();
+  picker.selected.clear();
+  if (elements.itemPickerAll.checked && target) {
+    picker.items.filter((item) => pickerSelectable(item, target)).forEach((item) => picker.selected.add(item.itemCode));
+  }
+  renderPicker();
+});
+elements.itemPickerLink.addEventListener("click", () => ignoreFailure(linkPickedItems()));
+elements.itemPickerForm.addEventListener("submit", (event) => event.preventDefault());
 
 elements.amaranceSettingsForm.addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -1821,7 +3031,6 @@ document.addEventListener("click", (event) => {
 });
 
 elements.logoutButton.addEventListener("click", async () => {
-  if (!await confirmDiscardChanges()) return;
   await ignoreFailure(api(API.LOGOUT, { method: "POST", body: "{}" }));
   window.location.replace("/login");
 });
@@ -1899,11 +3108,12 @@ async function initialize() {
   elements.buildStamp.textContent = build
     ? `${build.version}${build.builtAt ? ` · ${String(build.builtAt).slice(0, 10)}` : ""}`
     : "";
+  state.drafts = readStorage("drafts", {});
   renderProjects();
   renderCategorySets();
   renderSettings();
   setDirty(false);
-  await loadSnapshots();
+  await restoreTabs();
 }
 
 initialize().catch((error) => {
