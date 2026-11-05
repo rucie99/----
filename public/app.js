@@ -226,12 +226,31 @@ for (const button of document.querySelectorAll("[data-dialog-cancel]")) {
   });
 }
 
+/**
+ * 대화상자를 열고, 닫히면 onClose(돌려준 값)를 한 번 부릅니다.
+ * 보통은 close 이벤트로 알지만, 창이 화면에 안 보이는 상태(숨은 탭 · 자동 점검 브라우저)에서는
+ * close 이벤트가 오지 않을 수 있어 확인 · 취소 버튼으로 닫힐 때도 바로 결과를 넘깁니다.
+ */
 function openDialog(dialog, onClose) {
-  const handleClose = () => {
-    dialog.removeEventListener("close", handleClose);
+  let finished = false;
+  const finish = () => {
+    if (finished) return;
+    finished = true;
+    dialog.removeEventListener("close", finish);
+    dialog.removeEventListener("submit", handleSubmit);
+    dialog.removeEventListener("click", handleCancel);
     onClose(dialog.returnValue);
   };
-  dialog.addEventListener("close", handleClose);
+  // 제출하면 대화상자가 닫히거나(기본 동작 · 처리기가 직접 close), 입력 오류로 열린 채 남습니다. 닫혔을 때만 결과를 넘깁니다.
+  const handleSubmit = () => {
+    setTimeout(() => { if (!dialog.open) finish(); }, 0);
+  };
+  const handleCancel = (event) => {
+    if (event.target.closest("[data-dialog-cancel]")) setTimeout(() => { if (!dialog.open) finish(); }, 0);
+  };
+  dialog.addEventListener("close", finish);
+  dialog.addEventListener("submit", handleSubmit);
+  dialog.addEventListener("click", handleCancel);
   dialog.showModal();
 }
 
