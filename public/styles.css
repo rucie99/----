@@ -309,6 +309,9 @@ body.can-edit .receipt-toolbar.editor-only { display: flex; }
 .receipt-summary { color: var(--slate-500); font-size: 13px; }
 .receipt-details summary strong.has-unmapped { color: var(--warning); }
 .receipt-table code { color: var(--navy-900); font-weight: 700; }
+/* 규격은 길면 줄여 보이고, 마우스를 올리면 전체가 보입니다. */
+.receipt-table .spec-cell { max-width: 220px; overflow: hidden; color: var(--slate-700); text-overflow: ellipsis; }
+.receipt-table .spec-cell .muted { color: var(--slate-300); }
 .receipt-line { color: var(--slate-700); }
 .unmapped-row td { background: #fffbeb; }
 .unmapped-tag { display: inline-block; margin-right: 8px; padding: 2px 8px; border-radius: 999px; color: #92400e; background: #fde68a; font-size: 11.5px; font-weight: 800; }

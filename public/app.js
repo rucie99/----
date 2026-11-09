@@ -777,7 +777,7 @@ function filteredReceipts() {
     if (filter === RECEIPT_FILTER.UNMAPPED && receipt.lineId) return false;
     if (filter.startsWith("line-") && String(receipt.lineId) !== filter.slice(5)) return false;
     if (!keyword) return true;
-    return [receipt.itemCode, receipt.itemName, receipt.receiptNo].some((value) => String(value || "").toLowerCase().includes(keyword));
+    return [receipt.itemCode, receipt.itemName, receipt.specification, receipt.receiptNo].some((value) => String(value || "").toLowerCase().includes(keyword));
   });
 }
 
@@ -809,15 +809,16 @@ function renderReceipts() {
       <td>${escapeHtml(receipt.receiptNo)}</td>
       <td><code>${escapeHtml(receipt.itemCode)}</code></td>
       <td>${escapeHtml(receipt.itemName)}</td>
+      <td class="spec-cell"${receipt.specification ? ` title="${escapeHtml(receipt.specification)}"` : ""}>${receipt.specification ? escapeHtml(receipt.specification) : '<span class="muted">-</span>'}</td>
       <td class="category-cell">${category}</td>
       <td class="number-cell">${formatWon(receipt.amount)}</td>
       <td class="number-cell">${formatWon(receipt.vatAmount)}</td>
       <td class="editor-only"><button class="row-action danger delete-receipt" ${editable ? "" : "disabled"}>삭제</button></td>
     </tr>`;
-  }).join("") : `<tr><td class="empty-row" colspan="8">${snapshot.receipts.length ? "조건에 맞는 입고가 없습니다." : "불러온 입고 내역이 없습니다."}</td></tr>`;
+  }).join("") : `<tr><td class="empty-row" colspan="9">${snapshot.receipts.length ? "조건에 맞는 입고가 없습니다." : "불러온 입고 내역이 없습니다."}</td></tr>`;
   elements.receiptTotals.innerHTML = rows.length ? `
     <tr>
-      <td colspan="5">합계 · ${rows.length.toLocaleString("ko-KR")}건</td>
+      <td colspan="6">합계 · ${rows.length.toLocaleString("ko-KR")}건</td>
       <td class="number-cell">${formatWon(sumAmount(rows))}</td>
       <td class="number-cell">${formatWon(sumAmount(rows, "vatAmount"))}</td>
       <td class="editor-only"></td>
@@ -871,8 +872,9 @@ function openLineDetail(lineId) {
 /** 미분류 품번을 이 버전의 한 줄에 연결합니다(관리자는 분류 설정에도 함께 연결할 수 있음). */
 async function linkUnmappedItem(itemCode, itemName) {
   const receipts = state.snapshot.receipts.filter((receipt) => receipt.itemCode === itemCode);
+  const specification = receipts.find((receipt) => receipt.specification)?.specification;
   elements.linkItemSummary.textContent =
-    `${itemCode} · ${itemName} — 입고 ${receipts.length.toLocaleString("ko-KR")}건 · ${formatWon(sumAmount(receipts))}`;
+    `${itemCode} · ${itemName}${specification ? ` (${specification})` : ""} — 입고 ${receipts.length.toLocaleString("ko-KR")}건 · ${formatWon(sumAmount(receipts))}`;
   elements.linkItemLine.innerHTML = groupExecutionLines(state.snapshot.lines).map((group) => `
     <optgroup label="${escapeHtml(group.majorName)}">
       ${group.lines.map((line) => `<option value="${line.id}">${escapeHtml([line.middleName, line.minorName].filter(Boolean).join(" › "))}</option>`).join("")}

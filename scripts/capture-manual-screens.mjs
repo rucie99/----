@@ -69,7 +69,7 @@ async function seedDemo(server) {
 
   // 분류에 연결되지 않은 품번의 입고 1건(미분류 안내 · 줄에 연결 화면용).
   server.database.importReceipts(snapshot.id, [{
-    sourceKey: "DEMO-LOOSE-1", receiptNo: "RV000011", itemCode: "HB-121816", itemName: "오일리스 부시",
+    sourceKey: "DEMO-LOOSE-1", receiptNo: "RV000011", itemCode: "HB-121816", itemName: "오일리스 부시", specification: "Φ16*18*12",
     receiptDate: toDate.replaceAll("-", ""), amount: 1_240_000, vatAmount: 124_000,
   }]);
 

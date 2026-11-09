@@ -188,6 +188,7 @@ export class AppDatabase {
         receipt_no TEXT NOT NULL,
         item_code TEXT NOT NULL,
         item_name TEXT NOT NULL,
+        specification TEXT NOT NULL DEFAULT '',
         receipt_date TEXT NOT NULL,
         amount INTEGER NOT NULL DEFAULT 0,
         vat_amount INTEGER NOT NULL DEFAULT 0,
@@ -268,6 +269,10 @@ export class AppDatabase {
       this.db.exec("ALTER TABLE snapshots ADD COLUMN receipt_from TEXT");
       this.db.exec("ALTER TABLE snapshots ADD COLUMN receipt_to TEXT");
       this.db.exec("ALTER TABLE snapshots ADD COLUMN receipts_fetched_at TEXT");
+    }
+    if (!this.columnNames("receipts").has("specification")) {
+      // 입고 상세에 품목 규격을 보여 줍니다. 이미 불러온 입고는 '최신으로 새로 고침' 때 채워집니다.
+      this.db.exec("ALTER TABLE receipts ADD COLUMN specification TEXT NOT NULL DEFAULT ''");
     }
     if (!snapshotColumns.has("revision")) {
       // 저장 시각(밀리초)만으로는 같은 순간의 두 저장을 구분하지 못하므로
@@ -1221,10 +1226,11 @@ export class AppDatabase {
   listReceivedUnmappedItems(categorySetId = null) {
     const setId = categorySetId ? this.assertCategorySet(categorySetId).id : this.getCurrentCategorySetId();
     return this.db.prepare(`
-      SELECT item_code AS itemCode, MAX(item_name) AS itemName, '' AS specification,
+      SELECT item_code AS itemCode, MAX(item_name) AS itemName, MAX(specification) AS specification,
              COUNT(*) AS receiptCount, SUM(amount) AS receiptAmount, MAX(receipt_date) AS lastReceiptDate
       FROM (
-        SELECT item_code, source_key, MAX(item_name) AS item_name, MAX(amount) AS amount, MAX(receipt_date) AS receipt_date
+        SELECT item_code, source_key, MAX(item_name) AS item_name, MAX(specification) AS specification,
+               MAX(amount) AS amount, MAX(receipt_date) AS receipt_date
         FROM receipts GROUP BY item_code, source_key
       )
       WHERE item_code NOT IN (SELECT item_code FROM item_mappings WHERE category_set_id = ?)
@@ -1727,12 +1733,13 @@ export class AppDatabase {
       this.db.prepare("SELECT item_code AS itemCode FROM snapshot_items WHERE snapshot_id = ?").all(snapshotId).map((row) => row.itemCode),
     );
     const insert = this.db.prepare(`
-      INSERT INTO receipts (snapshot_id, source_key, receipt_no, item_code, item_name, receipt_date, amount, vat_amount, fetched_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO receipts (snapshot_id, source_key, receipt_no, item_code, item_name, specification, receipt_date, amount, vat_amount, fetched_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(snapshot_id, source_key) DO UPDATE SET
         receipt_no = excluded.receipt_no,
         item_code = excluded.item_code,
         item_name = excluded.item_name,
+        specification = excluded.specification,
         receipt_date = excluded.receipt_date,
         amount = excluded.amount,
         vat_amount = excluded.vat_amount,
@@ -1780,6 +1787,7 @@ export class AppDatabase {
           String(receipt.receiptNo ?? "").slice(0, 60),
           receipt.itemCode,
           String(receipt.itemName ?? receipt.itemCode).slice(0, 120),
+          String(receipt.specification ?? "").trim().slice(0, 200),
           String(receipt.receiptDate ?? "").slice(0, 20),
           toWon(receipt.amount),
           toWon(receipt.vatAmount),
@@ -1922,7 +1930,7 @@ export class AppDatabase {
   listReceipts(snapshotId) {
     return this.db.prepare(`
       SELECT r.id, r.source_key AS sourceKey, r.receipt_no AS receiptNo, r.item_code AS itemCode,
-             r.item_name AS itemName, r.receipt_date AS receiptDate, r.amount, r.vat_amount AS vatAmount,
+             r.item_name AS itemName, r.specification, r.receipt_date AS receiptDate, r.amount, r.vat_amount AS vatAmount,
              r.fetched_at AS fetchedAt, si.snapshot_line_id AS lineId
       FROM receipts r
       LEFT JOIN snapshot_items si ON si.snapshot_id = r.snapshot_id AND si.item_code = r.item_code

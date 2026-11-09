@@ -10,17 +10,18 @@ import {
 import { badRequest, AppError } from "./errors.mjs";
 import { toWon } from "./calculations.mjs";
 
+/** DEMO 품목: [품번, 품명, 규격]. */
 const DEMO_ITEMS = [
-  ["MAT-1001", "제어반 본체"],
-  ["MAT-1002", "인버터"],
-  ["PIPE-2001", "스테인리스 배관"],
-  ["ELEC-3001", "전력 케이블"],
-  ["PROC-4001", "프레임 가공"],
-  ["ASSY-5001", "장비 조립"],
-  ["SITE-6001", "현장 설치"],
-  ["TEST-7001", "시운전"],
-  ["SHIP-8001", "포장 및 운송"],
-  ["PM-9001", "프로젝트 관리"],
+  ["MAT-1001", "제어반 본체", "1200*600*2000 SS400"],
+  ["MAT-1002", "인버터", "380V 15kW"],
+  ["PIPE-2001", "스테인리스 배관", "SUS304 50A*6M"],
+  ["ELEC-3001", "전력 케이블", "F-CV 4C*16SQ"],
+  ["PROC-4001", "프레임 가공", "150*75*10M"],
+  ["ASSY-5001", "장비 조립", "라인 1식"],
+  ["SITE-6001", "현장 설치", "평택 공장 1식"],
+  ["TEST-7001", "시운전", "2일"],
+  ["SHIP-8001", "포장 및 운송", "5톤 윙바디"],
+  ["PM-9001", "프로젝트 관리", "월 단위"],
 ];
 
 const REQUEST_TIMEOUT_MS = 30_000;
@@ -264,7 +265,7 @@ export class AmaranceClient {
   /** 사용 중인 품목 전체 목록. 잠시 메모리에 두고 재사용합니다. */
   async listItems({ refresh = false } = {}) {
     if (this.mode === AMARANCE_MODE.DEMO) {
-      return DEMO_ITEMS.map(([itemCode, itemName]) => ({ itemCode, itemName, specification: "" }));
+      return DEMO_ITEMS.map(([itemCode, itemName, specification]) => ({ itemCode, itemName, specification }));
     }
     if (!refresh && this.itemCache && Date.now() - this.itemCache.loadedAt < ITEM_CACHE_TTL_MS) {
       return this.itemCache.items;
@@ -290,11 +291,12 @@ export class AmaranceClient {
     if (this.mode === AMARANCE_MODE.DEMO) {
       const amounts = [48_500_000, 18_200_000, 12_700_000, 9_850_000, 31_400_000, 17_600_000, 22_000_000, 8_900_000, 6_700_000, 13_500_000];
       onProgress?.({ stage: "detail", done: DEMO_ITEMS.length, total: DEMO_ITEMS.length });
-      return DEMO_ITEMS.map(([itemCode, itemName], index) => ({
+      return DEMO_ITEMS.map(([itemCode, itemName, specification], index) => ({
         sourceKey: `${projectCode}-DEMO-${index + 1}`,
         receiptNo: `RV${String(index + 1).padStart(6, "0")}`,
         itemCode,
         itemName,
+        specification,
         receiptDate: compactDate(toDate || new Date().toISOString().slice(0, 10)),
         amount: amounts[index],
         vatAmount: Math.round(amounts[index] * 0.1),
@@ -329,6 +331,8 @@ export class AmaranceClient {
           receiptNo: header.rcvNb,
           itemCode: String(detail.itemCd ?? ""),
           itemName: String(detail.itemNm ?? detail.itemCd ?? ""),
+          // 입고 디테일의 itemDc 가 품목 규격입니다(예: 150*75*10M).
+          specification: String(detail.itemDc ?? "").trim(),
           receiptDate: String(header.rcvDt ?? detail.rcvDt ?? ""),
           amount: toWon(detail.rcvgAm),
           vatAmount: toWon(detail.rcvvAm),

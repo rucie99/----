@@ -78,6 +78,7 @@ test("입고 헤더의 입고번호로 디테일을 조회하고 원화금액을
           rcvSq: 1,
           itemCd: "MBD-A520M-001",
           itemNm: "메인보드 A520M",
+          itemDc: " 150*75*10M ",
           pjtCd: "P-001",
           rcvgAm: 1_000_000,
           rcvvAm: 100_000,
@@ -108,6 +109,7 @@ test("입고 헤더의 입고번호로 디테일을 조회하고 원화금액을
   assert.equal(requests[1].body.rcvNb, "RV2301000002");
   assert.equal(receipts[0].sourceKey, "RV2301000002:1");
   assert.equal(receipts[0].itemCode, "MBD-A520M-001");
+  assert.equal(receipts[0].specification, "150*75*10M", "입고 디테일의 itemDc 를 규격으로 받습니다");
   assert.equal(receipts[0].amount, 1_000_000);
   assert.equal(receipts[0].vatAmount, 100_000);
 });

@@ -70,6 +70,44 @@ test("새로 고침은 새 입고 · 금액 변경 · 사라진 입고를 세고
   database.close();
 });
 
+test("입고 규격을 저장하고, 규격 없이 불러온 입고는 새로 고침 때 규격이 채워진다", () => {
+  const database = new AppDatabase(":memory:");
+  const snapshot = newSnapshot(database);
+  const range = { from: "20261001", to: "20261031" };
+  // 규격을 받기 전(이전 버전)에 불러온 입고라고 가정합니다.
+  database.importReceipts(snapshot.id, [receipt("A", 100), { ...receipt("B", 200), specification: "  M8*20 " }], { range });
+  let rows = database.getSnapshot(snapshot.id).receipts;
+  assert.equal(rows.find((row) => row.sourceKey === "A").specification, "");
+  assert.equal(rows.find((row) => row.sourceKey === "B").specification, "M8*20", "앞뒤 공백은 지웁니다");
+
+  const refreshed = database.importReceipts(snapshot.id, [{ ...receipt("A", 100), specification: "150*75*10M" }, { ...receipt("B", 200), specification: "M8*20" }], {
+    replace: true, keepExclusions: true, range,
+  });
+  assert.equal(refreshed.changedCount, 0, "규격만 채워진 것은 금액 변경으로 세지 않습니다");
+  rows = refreshed.snapshot.receipts;
+  assert.equal(rows.find((row) => row.sourceKey === "A").specification, "150*75*10M");
+
+  const loose = database.listReceivedUnmappedItems().find((row) => row.itemCode === "MAT-1001");
+  assert.equal(loose, undefined, "MAT-1001 은 기본 설정에 연결된 품번입니다");
+  database.importReceipts(snapshot.id, [{ ...receipt("L", 50, "LOOSE-1"), specification: "Φ20" }], { range });
+  assert.equal(database.listReceivedUnmappedItems().find((row) => row.itemCode === "LOOSE-1").specification, "Φ20");
+  database.close();
+});
+
+test("규격 칸이 없던 이전 DB 도 열면 규격 칸이 생기고 입고는 그대로 남는다", () => {
+  const database = new AppDatabase(":memory:");
+  const snapshot = newSnapshot(database);
+  database.importReceipts(snapshot.id, [receipt("A", 100)], { range: { from: "20261001", to: "20261031" } });
+  database.db.exec("ALTER TABLE receipts DROP COLUMN specification");
+  assert.equal(database.columnNames("receipts").has("specification"), false);
+  database.migrate();
+  assert.equal(database.columnNames("receipts").has("specification"), true);
+  const [row] = database.getSnapshot(snapshot.id).receipts;
+  assert.equal(row.sourceKey, "A");
+  assert.equal(row.specification, "");
+  database.close();
+});
+
 test("API: 새로 고침은 불러온 적이 있는 작성중 버전에서만 되고, 기간이 길면 나눠 조회한다", async (t) => {
   const server = await startTestServer();
   t.after(() => server.stop());
